@@ -3,7 +3,7 @@
 // Webhook Shopify orders/paid → OpenAI GPT-4 → Note commande
 // ============================================================
 
-require('dotenv').config();
+require('dotenv').config(); 
 const express  = require('express');
 const crypto   = require('crypto');
 const OpenAI   = require('openai');

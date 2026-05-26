@@ -8,6 +8,9 @@ const express  = require('express');
 const crypto   = require('crypto');
 const OpenAI   = require('openai');
 
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
@@ -20,6 +23,53 @@ app.use(express.json());
 
 // ── Health check Railway ──
 app.get('/', (req, res) => res.json({ status: 'ok', service: 'Dorémi Railway' }));
+
+// ── OAuth Callback — capture le token Shopify ──
+app.get('/oauth/callback', async (req, res) => {
+  const { code, state } = req.query;
+
+  if (!code) {
+    return res.status(400).send('Pas de code OAuth reçu');
+  }
+
+  console.log('[Dorémi OAuth] Code reçu:', code);
+
+  try {
+    const shopDomain = (process.env.SHOPIFY_SHOP_DOMAIN || '').replace(/^https?:\/\//, '').trim();
+    const clientId     = process.env.SHOPIFY_CLIENT_ID;
+    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+
+    const tokenRes = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id:     clientId,
+        client_secret: clientSecret,
+        code,
+      }),
+    });
+
+    const tokenData = await tokenRes.json();
+    console.log('[Dorémi OAuth] Token reçu:', JSON.stringify(tokenData));
+
+    if (tokenData.access_token) {
+      // Afficher le token dans la réponse pour le copier dans Railway
+      res.send(`
+        <html><body style="font-family:sans-serif;padding:40px;max-width:600px">
+          <h2>✅ Token Shopify obtenu !</h2>
+          <p>Copie ce token et colle-le dans Railway > Variables > <strong>SHOPIFY_ACCESS_TOKEN</strong></p>
+          <textarea style="width:100%;padding:12px;font-size:14px;border:2px solid #444;border-radius:8px" rows="3">${tokenData.access_token}</textarea>
+          <p style="color:#888;font-size:13px">Scope : ${tokenData.scope}</p>
+        </body></html>
+      `);
+    } else {
+      res.send('<h2>❌ Erreur</h2><pre>' + JSON.stringify(tokenData, null, 2) + '</pre>');
+    }
+  } catch (e) {
+    console.error('[Dorémi OAuth] Erreur:', e);
+    res.status(500).send('Erreur: ' + e.message);
+  }
+});
 
 // ============================================================
 // WEBHOOK SHOPIFY — orders/paid
@@ -92,11 +142,11 @@ app.post('/webhook/orders-paid', async (req, res) => {
     return;
   }
 
-  // ── 6. Écrire les paroles dans la note de commande ─────
+  // ── 6. Envoyer les paroles par email ────────────────────
   const noteFinale = buildNote(order, brief, paroles, isDeuil);
-  await ajouterNoteCommande(order.id, noteFinale);
+  await envoyerEmailParoles(order, brief, paroles, isDeuil, noteFinale);
 
-  console.log(`[Dorémi] ✅ Note ajoutée sur commande #${order.order_number}`);
+  console.log(`[Dorémi] ✅ Email envoyé pour commande #${order.order_number}`);
 });
 
 // ============================================================
@@ -234,36 +284,86 @@ Supprime tous les mots de structure comme "Couplet", "Refrain", "Pont", "Outro" 
 }
 
 // ============================================================
-// NOTE DE COMMANDE SHOPIFY
-// Écrit les paroles générées dans la note de la commande
-// Visible dans Admin > Commandes > [commande] > Notes
+// ENVOI EMAIL — Resend
+// Envoie les paroles générées par email au parolier
 // ============================================================
-async function ajouterNoteCommande(orderId, note) {
-  // Nettoyer le domaine au cas où il contient https://
-  const shop        = (process.env.SHOPIFY_SHOP_DOMAIN || '').replace(/^https?:\/\//, '').trim();
-  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+async function envoyerEmailParoles(order, brief, paroles, isDeuil, noteComplete) {
+  const prenomKey    = isDeuil ? 'Prénom du proche' : 'Prénom destinataire';
+  const prenom       = brief[prenomKey] || 'Destinataire';
+  const occasion     = brief['Occasion'] || (isDeuil ? 'Souvenir & Mémoire' : 'Festivité');
+  const style        = brief['Style musical'] || '—';
+  const ambiance     = brief['Ambiance'] || '—';
+  const clientEmail  = order.email;
+  const clientNom    = `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim();
+  const parolierEmail = process.env.PAROLIER_EMAIL || process.env.FROM_EMAIL;
 
-  const url = `https://${shop}/admin/api/2024-01/orders/${orderId}.json`;
+  // Email HTML pour le parolier
+  const htmlEmail = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: sans-serif; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; }
+    .header { background: #444441; color: white; padding: 24px; border-radius: 8px; margin-bottom: 24px; }
+    .header h1 { margin: 0; font-size: 20px; }
+    .header p { margin: 6px 0 0; opacity: 0.7; font-size: 14px; }
+    .meta { background: #f5f5f3; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+    .meta-row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 14px; }
+    .meta-label { color: #888; }
+    .meta-val { font-weight: 500; }
+    .paroles { background: white; border: 1px solid #e0e0dc; border-radius: 8px; padding: 24px; margin-bottom: 24px; }
+    .paroles h2 { font-size: 16px; color: #444441; margin-top: 0; }
+    .paroles pre { white-space: pre-wrap; font-family: Georgia, serif; font-size: 15px; line-height: 1.8; color: #333; }
+    .brief { background: #fafaf8; border: 1px solid #e0e0dc; border-radius: 8px; padding: 20px; font-size: 13px; }
+    .brief h3 { margin-top: 0; color: #444441; }
+    .brief-field { margin: 8px 0; }
+    .brief-label { font-weight: 600; color: #666; }
+    .footer { margin-top: 24px; font-size: 12px; color: #aaa; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎵 Dorémi — Nouvelles paroles générées</h1>
+    <p>Commande #${order.order_number} · ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+  </div>
+
+  <div class="meta">
+    <div class="meta-row"><span class="meta-label">Client</span><span class="meta-val">${clientNom} &lt;${clientEmail}&gt;</span></div>
+    <div class="meta-row"><span class="meta-label">Pour</span><span class="meta-val">${prenom}</span></div>
+    <div class="meta-row"><span class="meta-label">Occasion</span><span class="meta-val">${occasion}</span></div>
+    <div class="meta-row"><span class="meta-label">Style</span><span class="meta-val">${style}</span></div>
+    <div class="meta-row"><span class="meta-label">Ambiance</span><span class="meta-val">${ambiance}</span></div>
+    <div class="meta-row"><span class="meta-label">Délai</span><span class="meta-val">${brief['Délai choisi'] || 'Standard'}</span></div>
+  </div>
+
+  <div class="paroles">
+    <h2>🎶 Paroles générées par GPT-4</h2>
+    <pre>${paroles}</pre>
+  </div>
+
+  <div class="brief">
+    <h3>📋 Brief complet du client</h3>
+    ${Object.entries(brief)
+      .filter(([k]) => !k.startsWith('_'))
+      .map(([k, v]) => `<div class="brief-field"><span class="brief-label">${k} :</span> ${v}</div>`)
+      .join('')}
+  </div>
+
+  <div class="footer">Dorémi · Généré automatiquement après paiement · Commande #${order.order_number}</div>
+</body>
+</html>`;
 
   try {
-    const res = await fetch(url, {
-      method:  'PUT',
-      headers: {
-        'Content-Type':         'application/json',
-        'X-Shopify-Access-Token': accessToken,
-      },
-      body: JSON.stringify({ order: { id: orderId, note } }),
+    const result = await resend.emails.send({
+      from:    process.env.FROM_EMAIL || 'Dorémi <noreply@doremi.fr>',
+      to:      [parolierEmail],
+      subject: `🎵 [#${order.order_number}] Nouvelles paroles — ${prenom} · ${occasion}`,
+      html:    htmlEmail,
     });
-
-    const responseText = await res.text();
-    if (!res.ok) {
-      console.error(`[Dorémi] Erreur Shopify API ${res.status}:`, responseText);
-    } else {
-      console.log(`[Dorémi] ✅ Note écrite sur commande ${orderId} — statut ${res.status}`);
-      console.log(`[Dorémi] Réponse Shopify:`, responseText.substring(0, 200));
-    }
+    console.log(`[Dorémi] Email envoyé à ${parolierEmail} — ID: ${result.data?.id}`);
   } catch (e) {
-    console.error('[Dorémi] Erreur fetch Shopify:', e);
+    console.error('[Dorémi] Erreur envoi email:', e);
   }
 }
 

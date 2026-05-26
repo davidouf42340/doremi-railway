@@ -239,7 +239,8 @@ Supprime tous les mots de structure comme "Couplet", "Refrain", "Pont", "Outro" 
 // Visible dans Admin > Commandes > [commande] > Notes
 // ============================================================
 async function ajouterNoteCommande(orderId, note) {
-  const shop        = process.env.SHOPIFY_SHOP_DOMAIN;  // ex: mon-shop.myshopify.com
+  // Nettoyer le domaine au cas où il contient https://
+  const shop        = (process.env.SHOPIFY_SHOP_DOMAIN || '').replace(/^https?:\/\//, '').trim();
   const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
 
   const url = `https://${shop}/admin/api/2024-01/orders/${orderId}.json`;
@@ -254,11 +255,12 @@ async function ajouterNoteCommande(orderId, note) {
       body: JSON.stringify({ order: { id: orderId, note } }),
     });
 
+    const responseText = await res.text();
     if (!res.ok) {
-      const err = await res.text();
-      console.error(`[Dorémi] Erreur Shopify API ${res.status}:`, err);
+      console.error(`[Dorémi] Erreur Shopify API ${res.status}:`, responseText);
     } else {
-      console.log(`[Dorémi] Note écrite sur commande ${orderId}`);
+      console.log(`[Dorémi] ✅ Note écrite sur commande ${orderId} — statut ${res.status}`);
+      console.log(`[Dorémi] Réponse Shopify:`, responseText.substring(0, 200));
     }
   } catch (e) {
     console.error('[Dorémi] Erreur fetch Shopify:', e);

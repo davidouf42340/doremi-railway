@@ -3,7 +3,7 @@
 // Webhook Shopify orders/paid → OpenAI GPT-4 → Note commande
 // ============================================================
 
-require('dotenv').config(); 
+require('dotenv').config();
 const express  = require('express');
 const crypto   = require('crypto');
 const OpenAI   = require('openai');
@@ -56,7 +56,9 @@ app.post('/webhook/orders-paid', async (req, res) => {
   // ── 3. Trouver le line item avec les properties du brief ─
   const briefItem = order.line_items?.find(item =>
     item.properties && item.properties.length > 0 &&
-    item.properties.some(p => p.name === '_type_formulaire')
+    item.properties.some(p =>
+      p.name === '_type_formulaire' || p.name === '_version_formulaire'
+    )
   );
 
   if (!briefItem) {
@@ -68,7 +70,8 @@ app.post('/webhook/orders-paid', async (req, res) => {
   const brief = {};
   briefItem.properties.forEach(p => { brief[p.name] = p.value; });
 
-  const typeFormulaire = brief['_type_formulaire'] || 'doremi-festivites-v2';
+  // Compatibilité festivités (_version_formulaire) et deuil (_type_formulaire)
+  const typeFormulaire = brief['_type_formulaire'] || brief['_version_formulaire'] || 'doremi-festivites-v2';
   const isDeuil        = typeFormulaire.includes('deuil');
 
   console.log(`[Dorémi] Type : ${typeFormulaire} | Deuil : ${isDeuil}`);
@@ -298,6 +301,7 @@ ${separator}`;
 }
 
 // ── Démarrage ──
+// 0.0.0.0 obligatoire pour Railway (sinon healthcheck échoue)
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Dorémi Railway démarré sur le port ${PORT}`);
 });

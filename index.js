@@ -295,6 +295,64 @@ Brief soumis le : ${brief['_timestamp_brief'] ? new Date(brief['_timestamp_brief
 ${separator}`;
 }
 
+// ============================================================
+// ROUTE POST /formulaire — Soumission post-achat
+// Reçoit les données du brief APRÈS le paiement Shopify
+// Corps attendu : { order_id, type_formulaire, ...champs }
+// ============================================================
+app.post('/formulaire', async (req, res) => {
+  const { order_id, type_formulaire, ...champs } = req.body;
+
+  if (!order_id) {
+    return res.status(400).json({ error: 'order_id manquant' });
+  }
+
+  console.log(`[Dorémi /formulaire] Reçu pour commande ${order_id} — type: ${type_formulaire}`);
+
+  const isDeuil = (type_formulaire || '').includes('deuil');
+
+  // Construire un objet brief compatible avec les fonctions existantes
+  const brief = { ...champs, '_type_formulaire': type_formulaire, '_timestamp_brief': new Date().toISOString() };
+
+  // Construire le texte du brief
+  const briefTexte = isDeuil
+    ? formatBriefDeuil(brief, { order_number: order_id, email: '' })
+    : formatBriefFestivites(brief, { order_number: order_id, email: '' });
+
+  // Générer les paroles via OpenAI
+  let paroles;
+  try {
+    paroles = await genererParoles(briefTexte, isDeuil);
+    console.log(`[Dorémi /formulaire] Paroles générées pour commande ${order_id}`);
+  } catch (e) {
+    console.error('[Dorémi /formulaire] Erreur OpenAI:', e);
+    await ajouterNoteCommande(order_id, `Erreur génération paroles : ${e.message}`);
+    return res.status(500).json({ error: 'Erreur génération paroles' });
+  }
+
+  // Récupérer les infos de commande Shopify pour construire la note
+  let order = { id: order_id, order_number: order_id, email: '', billing_address: {} };
+  try {
+    const shop = (process.env.SHOPIFY_SHOP_DOMAIN || '').replace(/^https?:\/\//, '').trim();
+    const shopRes = await fetch(`https://${shop}/admin/api/2024-01/orders/${order_id}.json`, {
+      headers: { 'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN }
+    });
+    if (shopRes.ok) {
+      const data = await shopRes.json();
+      order = data.order;
+    }
+  } catch (e) {
+    console.warn('[Dorémi /formulaire] Impossible de récupérer la commande Shopify:', e.message);
+  }
+
+  // Écrire la note dans la commande Shopify
+  const noteFinale = buildNote(order, brief, paroles, isDeuil);
+  await ajouterNoteCommande(order_id, noteFinale);
+
+  console.log(`[Dorémi /formulaire] ✅ Note ajoutée sur commande ${order_id}`);
+  res.json({ success: true, order_id });
+});
+
 // ── Démarrage ──
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Doremi Railway demarre sur le port ${PORT}`);

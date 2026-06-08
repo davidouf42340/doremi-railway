@@ -14,6 +14,19 @@ const PORT = process.env.PORT || 3000;
 // ── OpenAI client ──
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ── CORS — autorise doremisouvenir.fr ──
+app.use((req, res, next) => {
+  const allowed = ['https://doremisouvenir.fr', 'https://01xc0k-tz.myshopify.com'];
+  const origin  = req.headers.origin;
+  if (allowed.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // ── Body raw pour vérification signature Shopify ──
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());

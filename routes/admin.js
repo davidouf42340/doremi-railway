@@ -15,6 +15,9 @@ const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50
 // ── Middleware auth admin ──
 // Vérifie DOREMI_ADMIN_SECRET via query param ou header
 router.use((req, res, next) => {
+  // Laisser passer la route de login
+  if (req.path === '/login' && req.method === 'POST') return next();
+
   const secret = process.env.DOREMI_ADMIN_SECRET;
   if (!secret) return next(); // pas de secret configuré = pas de protection
 

@@ -7,6 +7,7 @@ const express = require('express');
 const db      = require('../db');
 const { generateLyricsPDF }  = require('../utils/pdf');
 const { generateQRDataUrl }  = require('../utils/qrcode');
+const { SECTION_PATTERN }    = require('../utils/lyrics-sections');
 
 const router = express.Router();
 
@@ -214,11 +215,10 @@ function personalPage(order, qrDataUrl, shareUrl, isOwner) {
     : `Chanson pour ${recipientName} — DoRémi Souvenir`;
 
   // Paroles formatées — détecte les labels de structure (Couplet 1, Refrain, Pont, etc.)
-  const sectionPattern = /^(Couplet\s*\d*|Refrain|Dernier refrain|Pont|Outro|Intro|Pre-refrain|Pré-refrain|Bridge)$/i;
   const lyricsHtml = lyrics.split('\n').map(line => {
     const trimmed = line.trim();
     if (trimmed === '') return '<div class="lyrics-divider"></div>';
-    if (sectionPattern.test(trimmed)) return `<div class="lyrics-section-label">${trimmed}</div>`;
+    if (SECTION_PATTERN.test(trimmed)) return `<div class="lyrics-section-label">${trimmed}</div>`;
     return line;
   }).join('\n');
 

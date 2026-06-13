@@ -3,7 +3,7 @@
 // Utilitaire partagé (admin, client, pages)
 // ============================================================
 
-const SECTION_PATTERN = /^(Couplet\s*\d*|Refrain|Dernier refrain|Pont|Outro|Intro|Pre-refrain|Pré-refrain|Bridge)$/i;
+const SECTION_PATTERN = /^\(?(Couplet\s*\d*|Refrain|Dernier refrain|Pont|Outro|Intro|Pre-refrain|Pré-refrain|Bridge)\)?$/i;
 
 /**
  * Parse un texte de paroles en sections structurées.
@@ -21,9 +21,10 @@ function parseLyricsIntoSections(text) {
     const trimmed = line.trim();
 
     if (SECTION_PATTERN.test(trimmed)) {
-      // Nouvelle section détectée
+      // Nouvelle section détectée — nettoyer les parenthèses éventuelles
       if (current) sections.push(current);
-      current = { label: trimmed, lines: [] };
+      const cleanLabel = trimmed.replace(/^\(/, '').replace(/\)$/, '');
+      current = { label: cleanLabel, lines: [] };
     } else if (current) {
       // Ligne dans une section existante
       // Ignorer les lignes vides juste après le label (séparateur label/contenu)

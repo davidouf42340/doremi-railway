@@ -132,6 +132,7 @@ const STYLES = `
   .lyrics-card::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 60px; height: 3px; background: var(--or); border-radius: 0 0 3px 3px; }
   .lyrics-text { font-family: var(--serif); font-size: 19px; line-height: 2.2; color: var(--charbon); text-align: center; white-space: pre-line; }
   .lyrics-divider { width: 40px; height: 1px; background: var(--or); margin: 28px auto; opacity: 0.5; }
+  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 32px 0 12px; display: block; }
 
   /* Boutons */
   .actions-row { display: flex; gap: 12px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap; }
@@ -212,10 +213,14 @@ function personalPage(order, qrDataUrl, shareUrl, isOwner) {
     ? `DoRémi Souvenir — Chanson pour ${recipientName}`
     : `Chanson pour ${recipientName} — DoRémi Souvenir`;
 
-  // Paroles formatées
-  const lyricsHtml = lyrics.split('\n').map(line =>
-    line.trim() === '' ? '<div class="lyrics-divider"></div>' : line
-  ).join('\n');
+  // Paroles formatées — détecte les labels de structure (Couplet 1, Refrain, Pont, etc.)
+  const sectionPattern = /^(Couplet\s*\d*|Refrain|Dernier refrain|Pont|Outro|Intro|Pre-refrain|Pré-refrain|Bridge)$/i;
+  const lyricsHtml = lyrics.split('\n').map(line => {
+    const trimmed = line.trim();
+    if (trimmed === '') return '<div class="lyrics-divider"></div>';
+    if (sectionPattern.test(trimmed)) return `<div class="lyrics-section-label">${trimmed}</div>`;
+    return line;
+  }).join('\n');
 
   // Section chansons
   let songsHtml = '';

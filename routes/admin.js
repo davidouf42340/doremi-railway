@@ -265,25 +265,32 @@ async function uploadToShopifyFiles(file) {
 // PAGES HTML — Admin
 // ============================================================
 
+const LOGO_URL = 'https://doremisouvenir.fr/cdn/shop/files/logo-doremi-chanson-personnalisee.png';
+
 const STYLES = `
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { --charbon:#2C2C2A; --or:#EF9F27; --or-pale:#FAEEDA; --gris:#888780; --gris-light:#D3D1C7; --blanc:#fff; --radius:10px; }
+  :root { --charbon:#2C2C2A; --or:#FCB02E; --or-hover:#FCC02E; --or-pale:#FDF6E8; --gris:#888780; --gris-light:#D3D1C7; --gris-bg:#F9F8F6; --blanc:#FFFFFF; --radius:10px; --serif:'Cormorant Garamond',Georgia,serif; --sans:'Montserrat',system-ui,sans-serif; }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:'DM Sans',system-ui,sans-serif; background:#f5f5f3; color:var(--charbon); line-height:1.6; }
-  .topbar { background:var(--charbon); color:var(--blanc); padding:14px 32px; display:flex; align-items:center; justify-content:space-between; }
-  .topbar-logo { font-family:'Cormorant Garamond',Georgia,serif; font-size:22px; }
-  .topbar-nav a { color:var(--gris-light); font-size:13px; text-decoration:none; margin-left:20px; }
-  .topbar-nav a:hover { color:var(--blanc); }
+  body { font-family:var(--sans); background:var(--gris-bg); color:var(--charbon); line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .topbar { background:var(--blanc); border-bottom:1px solid #EEEEE9; padding:12px 32px; display:flex; align-items:center; justify-content:space-between; }
+  .topbar-logo { display:flex; align-items:center; gap:12px; text-decoration:none; }
+  .topbar-logo img { height:40px; width:auto; }
+  .topbar-badge { font-size:10px; font-weight:700; background:var(--or); color:var(--charbon); padding:2px 8px; border-radius:4px; letter-spacing:0.5px; text-transform:uppercase; }
+  .topbar-nav a { color:var(--gris); font-size:13px; text-decoration:none; margin-left:20px; font-weight:500; }
+  .topbar-nav a:hover { color:var(--charbon); }
   .container { max-width:1100px; margin:0 auto; padding:24px 32px; }
-  h1 { font-size:22px; font-weight:500; margin-bottom:20px; }
+  h1 { font-size:22px; font-weight:600; margin-bottom:20px; }
   .filters { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
-  .filter-btn { padding:6px 16px; border-radius:20px; border:1px solid var(--gris-light); background:var(--blanc); font-size:12px; cursor:pointer; text-decoration:none; color:var(--charbon); transition:all .15s; }
-  .filter-btn:hover, .filter-btn.active { background:var(--charbon); color:var(--blanc); border-color:var(--charbon); }
-  table { width:100%; border-collapse:collapse; background:var(--blanc); border-radius:var(--radius); overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.06); }
-  th { background:#fafaf9; text-align:left; padding:10px 16px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--gris); border-bottom:1px solid var(--gris-light); }
-  td { padding:12px 16px; font-size:13px; border-bottom:1px solid #f0f0ee; }
-  tr:hover td { background:#fdfcfa; }
-  .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:500; }
+  .filter-btn { padding:6px 16px; border-radius:20px; border:1.5px solid var(--gris-light); background:var(--blanc); font-size:12px; cursor:pointer; text-decoration:none; color:var(--charbon); transition:all .15s; font-weight:500; }
+  .filter-btn:hover, .filter-btn.active { background:var(--or); color:var(--charbon); border-color:var(--or); }
+  table { width:100%; border-collapse:collapse; background:var(--blanc); border-radius:var(--radius); overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.04); }
+  th { background:#FAFAF9; text-align:left; padding:10px 16px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--gris); border-bottom:1px solid #EEEEE9; }
+  td { padding:12px 16px; font-size:13px; border-bottom:1px solid #F5F5F3; }
+  tr:hover td { background:#FDFCFA; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; }
   .badge-received { background:#e8f0fe; color:#1a73e8; }
   .badge-generated { background:var(--or-pale); color:#b8860b; }
   .badge-pending { background:#fef3e0; color:#e65100; }
@@ -291,42 +298,42 @@ const STYLES = `
   .badge-delivered { background:#e8eaed; color:#5f6368; }
   .badge-deuil { background:#f3e8f4; color:#7b1fa2; }
   .badge-festivites { background:#e8f5e9; color:#2e7d32; }
-  .btn { display:inline-flex; align-items:center; gap:6px; padding:10px 20px; border-radius:8px; border:none; font-size:13px; font-weight:500; cursor:pointer; transition:all .15s; font-family:inherit; }
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:10px 20px; border-radius:8px; border:none; font-size:13px; font-weight:600; cursor:pointer; transition:all .15s; font-family:var(--sans); letter-spacing:0.2px; }
   .btn-primary { background:var(--charbon); color:var(--blanc); }
   .btn-primary:hover { background:#444; }
   .btn-gold { background:var(--or); color:var(--charbon); }
-  .btn-gold:hover { background:#d4890f; }
-  .btn-outline { background:none; border:1px solid var(--gris-light); color:var(--charbon); }
+  .btn-gold:hover { background:var(--or-hover); transform:translateY(-1px); box-shadow:0 4px 12px rgba(252,176,46,.3); }
+  .btn-outline { background:none; border:1.5px solid var(--gris-light); color:var(--charbon); }
   .btn-outline:hover { border-color:var(--charbon); }
   .btn-danger { background:#e24b4a; color:var(--blanc); }
-  .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .link { color:var(--or); text-decoration:none; font-weight:500; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
+  .link { color:var(--or); text-decoration:none; font-weight:600; }
   .link:hover { text-decoration:underline; }
-  .card { background:var(--blanc); border-radius:var(--radius); padding:24px; box-shadow:0 1px 3px rgba(0,0,0,.06); margin-bottom:16px; }
+  .card { background:var(--blanc); border-radius:var(--radius); padding:24px; box-shadow:0 2px 8px rgba(0,0,0,.04); margin-bottom:16px; }
   .card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
   .card-title { font-size:15px; font-weight:600; }
   .meta-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-bottom:20px; }
   .meta-item { font-size:12px; }
-  .meta-label { color:var(--gris); font-weight:300; }
-  .meta-value { font-weight:500; margin-top:2px; }
-  textarea.lyrics-editor { width:100%; min-height:300px; border:1px solid var(--gris-light); border-radius:8px; padding:16px; font-family:'Cormorant Garamond',Georgia,serif; font-size:16px; line-height:2; resize:vertical; outline:none; }
-  textarea.lyrics-editor:focus { border-color:var(--or); box-shadow:0 0 0 3px rgba(239,159,39,.1); }
+  .meta-label { color:var(--gris); font-weight:400; }
+  .meta-value { font-weight:600; margin-top:2px; }
+  textarea.lyrics-editor { width:100%; min-height:300px; border:1.5px solid var(--gris-light); border-radius:8px; padding:16px; font-family:var(--serif); font-size:16px; line-height:2; resize:vertical; outline:none; }
+  textarea.lyrics-editor:focus { border-color:var(--or); box-shadow:0 0 0 3px rgba(252,176,46,.15); }
   .actions-bar { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
   .upload-zone { border:2px dashed var(--gris-light); border-radius:8px; padding:24px; text-align:center; cursor:pointer; transition:all .15s; }
   .upload-zone:hover { border-color:var(--or); background:var(--or-pale); }
   .upload-zone.has-file { border-color:var(--or); background:var(--or-pale); }
   .file-info { font-size:12px; color:var(--gris); margin-top:8px; }
-  .toast { position:fixed; bottom:24px; right:24px; background:var(--charbon); color:var(--blanc); padding:12px 24px; border-radius:8px; font-size:13px; display:none; z-index:999; animation:fadeIn .3s; }
+  .toast { position:fixed; bottom:24px; right:24px; background:var(--charbon); color:var(--blanc); padding:12px 24px; border-radius:8px; font-size:13px; display:none; z-index:999; animation:fadeIn .3s; box-shadow:0 4px 12px rgba(0,0,0,.15); }
   @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-  .back-link { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--gris); text-decoration:none; margin-bottom:16px; }
+  .back-link { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--gris); text-decoration:none; margin-bottom:16px; font-weight:500; }
   .back-link:hover { color:var(--charbon); }
-  .brief-section { background:#fafaf9; border-radius:8px; padding:16px; margin-top:12px; }
-  .brief-item { font-size:12px; padding:4px 0; border-bottom:1px solid #f0f0ee; }
+  .brief-section { background:#FAFAF9; border-radius:8px; padding:16px; margin-top:12px; }
+  .brief-item { font-size:12px; padding:4px 0; border-bottom:1px solid #F0F0EE; }
   .brief-item:last-child { border:none; }
   .brief-key { color:var(--gris); }
   .status-flow { display:flex; gap:4px; align-items:center; margin-bottom:20px; flex-wrap:wrap; }
-  .status-step { padding:4px 12px; border-radius:16px; font-size:11px; background:#f0f0ee; color:var(--gris); }
-  .status-step.active { background:var(--or); color:var(--charbon); font-weight:600; }
+  .status-step { padding:4px 12px; border-radius:16px; font-size:11px; background:#F0F0EE; color:var(--gris); font-weight:500; }
+  .status-step.active { background:var(--or); color:var(--charbon); font-weight:700; }
   .status-step.done { background:var(--charbon); color:var(--blanc); }
   .status-arrow { color:var(--gris-light); font-size:11px; }
 </style>
@@ -373,13 +380,16 @@ function formatDate(d) {
 
 // ── Page de login ──
 function loginPage(error = '') {
-  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Doremi Admin</title>${STYLES}</head>
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DoRémi Admin</title>
+<link rel="icon" type="image/png" href="${LOGO_URL}">
+${STYLES}</head>
 <body>
-<div class="topbar"><span class="topbar-logo">DoReMi Admin</span></div>
+<div class="topbar"><a href="/admin/orders" class="topbar-logo"><img src="${LOGO_URL}" alt="DoRémi Souvenir"><span class="topbar-badge">Admin</span></a></div>
 <div class="container" style="max-width:400px;margin-top:80px">
   <div class="card" style="text-align:center">
+    <img src="${LOGO_URL}" alt="DoRémi" style="height:48px;margin-bottom:16px">
     <h1 style="margin-bottom:8px">Connexion</h1>
-    <p style="color:var(--gris);font-size:13px;margin-bottom:20px">Entrez le mot de passe admin Doremi</p>
+    <p style="color:var(--gris);font-size:13px;margin-bottom:20px">Entrez le mot de passe admin DoRémi</p>
     ${error ? `<p style="color:#e24b4a;font-size:13px;margin-bottom:12px">${error}</p>` : ''}
     <form method="POST" action="/admin/login">
       <input type="password" name="password" placeholder="Mot de passe" style="width:100%;padding:10px 14px;border:1px solid var(--gris-light);border-radius:8px;font-size:14px;margin-bottom:12px;outline:none" autofocus>
@@ -416,7 +426,7 @@ function ordersListPage(orders, total, currentStatus) {
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Doremi Admin — Commandes</title>${STYLES}</head>
 <body>
 <div class="topbar">
-  <span class="topbar-logo">DoReMi Admin</span>
+  <a href="/admin/orders" class="topbar-logo"><img src="${LOGO_URL}" alt="DoRémi Souvenir"><span class="topbar-badge">Admin</span></a>
   <div class="topbar-nav">
     <a href="/admin/orders">Commandes</a>
   </div>
@@ -476,7 +486,7 @@ function orderDetailPage(order) {
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Doremi Admin — ${order.shopify_order_number}</title>${STYLES}</head>
 <body>
 <div class="topbar">
-  <span class="topbar-logo">DoReMi Admin</span>
+  <a href="/admin/orders" class="topbar-logo"><img src="${LOGO_URL}" alt="DoRémi Souvenir"><span class="topbar-badge">Admin</span></a>
   <div class="topbar-nav"><a href="/admin/orders">Commandes</a></div>
 </div>
 <div class="container">

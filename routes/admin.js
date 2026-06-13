@@ -8,6 +8,7 @@ const multer  = require('multer');
 const path    = require('path');
 const db      = require('../db');
 const shopify = require('../utils/shopify-tags');
+const { parseLyricsIntoSections, reassembleSections } = require('../utils/lyrics-sections');
 
 const router  = express.Router();
 const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
@@ -94,6 +95,7 @@ router.post('/api/order/:id/send-to-client', async (req, res) => {
     await db.updateOrder(order.id, {
       status: 'pending_client_validation',
       lyrics_admin_edited: lyricsToSend,
+      lyrics_client_modifications: null, // Effacer les anciennes modifications (le client repart sur une version propre)
     });
 
     // Ajouter le tag + metafield Shopify pour déclencher l'email via Shopify Flow
@@ -451,25 +453,64 @@ function ordersListPage(orders, total, currentStatus) {
 // ── Page détail commande ──
 function orderDetailPage(order) {
   const lyrics = order.lyrics_admin_edited || order.lyrics_original || '';
+  const sections = parseLyricsIntoSections(lyrics);
   const briefData = order.brief_data || {};
   const briefItems = Object.entries(briefData)
     .filter(([k]) => !k.startsWith('_'))
     .map(([k, v]) => `<div class="brief-item"><span class="brief-key">${k} :</span> ${v}</div>`)
     .join('');
 
-  // Déterminer les modifications client
+  // Modifications client — groupées par section
   const clientMods = order.lyrics_client_modifications || [];
-  const clientModsHtml = clientMods.length > 0
-    ? `<div class="card">
+  let clientModsHtml = '';
+  if (clientMods.length > 0) {
+    // Détection ancien format (sans champ section) vs nouveau
+    const hasNewFormat = clientMods.some(m => m.section);
+    if (hasNewFormat) {
+      // Grouper par section
+      const grouped = {};
+      clientMods.forEach(m => {
+        const key = m.section || 'Autres';
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(m);
+      });
+      const groupedHtml = Object.entries(grouped).map(([section, mods]) => `
+        <div style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--or);margin-bottom:8px">${section}</div>
+          ${mods.map(m => `
+            <div style="padding:8px 0;border-bottom:1px solid #f0f0ee;font-size:13px">
+              <div style="color:var(--gris);text-decoration:line-through">${m.original}</div>
+              <div style="color:var(--or);font-weight:600;margin-top:2px">${m.modified || ''}</div>
+              ${m.remark ? `<div style="font-size:12px;color:var(--gris);font-style:italic;margin-top:4px">Remarque : ${m.remark}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
+      clientModsHtml = `<div class="card"><div class="card-header"><span class="card-title">Modifications demandées par le client</span></div>${groupedHtml}</div>`;
+    } else {
+      // Ancien format — liste plate
+      clientModsHtml = `<div class="card">
         <div class="card-header"><span class="card-title">Modifications du client</span></div>
         ${clientMods.map(m => `
           <div style="padding:8px 0;border-bottom:1px solid #f0f0ee;font-size:13px">
             <div style="color:var(--gris);text-decoration:line-through">${m.original}</div>
-            <div style="color:var(--or);font-weight:500;margin-top:2px">${m.modified}</div>
+            <div style="color:var(--or);font-weight:600;margin-top:2px">${m.modified}</div>
           </div>
         `).join('')}
-       </div>`
-    : '';
+       </div>`;
+    }
+  }
+
+  // Éditeur par sections
+  const sectionsEditorHtml = sections.map((section, i) => {
+    const lineCount = section.lines.length || 3;
+    const rows = Math.max(lineCount + 1, 3);
+    return `
+    <div class="section-editor" data-section-index="${i}">
+      <div class="section-label-admin">${section.label || 'Introduction'}</div>
+      <textarea class="lyrics-editor section-textarea" id="section-editor-${i}" rows="${rows}">${section.lines.join('\n')}</textarea>
+    </div>`;
+  }).join('');
 
   // Fichiers audio
   const song1 = order.song_file_1_url
@@ -479,11 +520,19 @@ function orderDetailPage(order) {
     ? `<div class="file-info" style="color:var(--charbon)">&#10003; ${order.song_file_2_name || 'Version 2'}</div>`
     : '';
 
-  const canSendToClient = ['lyrics_generated', 'client_validated'].includes(order.status);
+  const canSendToClient = ['lyrics_generated', 'client_validated', 'pending_client_validation'].includes(order.status);
   const canUpload = ['lyrics_generated', 'pending_client_validation', 'client_validated'].includes(order.status);
   const canDeliver = order.status === 'client_validated' && (order.song_file_1_url || order.song_file_2_url);
 
-  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Doremi Admin — ${order.shopify_order_number}</title>${STYLES}</head>
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DoRémi Admin — ${order.shopify_order_number}</title>
+<link rel="icon" type="image/png" href="${LOGO_URL}">
+${STYLES}
+<style>
+  .section-editor { margin-bottom:20px; }
+  .section-label-admin { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:var(--or); background:var(--or-pale); padding:5px 14px; border-radius:6px; margin-bottom:8px; }
+  .section-textarea { min-height:auto!important; }
+</style>
+</head>
 <body>
 <div class="topbar">
   <a href="/admin/orders" class="topbar-logo"><img src="${LOGO_URL}" alt="DoRémi Souvenir"><span class="topbar-badge">Admin</span></a>
@@ -508,7 +557,7 @@ function orderDetailPage(order) {
       <div class="meta-item"><div class="meta-label">Client</div><div class="meta-value">${order.customer_name || '—'}</div></div>
       <div class="meta-item"><div class="meta-label">Email</div><div class="meta-value">${order.customer_email || '—'}</div></div>
       <div class="meta-item"><div class="meta-label">Occasion</div><div class="meta-value">${order.occasion || '—'}</div></div>
-      <div class="meta-item"><div class="meta-label">Type</div><div class="meta-value">${order.type === 'deuil' ? 'Hommage / Deuil' : 'Festivites'}</div></div>
+      <div class="meta-item"><div class="meta-label">Type</div><div class="meta-value">${order.type === 'deuil' ? 'Hommage / Deuil' : 'Festivités'}</div></div>
       <div class="meta-item"><div class="meta-label">Date</div><div class="meta-value">${formatDate(order.created_at)}</div></div>
     </div>
     ${briefItems ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--gris);margin-top:8px">Voir le brief complet</summary><div class="brief-section">${briefItems}</div></details>` : ''}
@@ -516,13 +565,13 @@ function orderDetailPage(order) {
 
   ${clientModsHtml}
 
-  <!-- Editeur de paroles -->
+  <!-- Éditeur de paroles par sections -->
   <div class="card">
     <div class="card-header">
       <span class="card-title">Paroles</span>
       <button class="btn btn-outline" onclick="saveLyrics()" id="btn-save">Sauvegarder</button>
     </div>
-    <textarea class="lyrics-editor" id="lyrics-editor">${lyrics}</textarea>
+    ${sectionsEditorHtml}
     <div class="actions-bar">
       ${canSendToClient ? '<button class="btn btn-gold" onclick="sendToClient()" id="btn-send">Envoyer au client pour validation</button>' : ''}
     </div>
@@ -583,6 +632,7 @@ function orderDetailPage(order) {
 
 <script>
 const ORDER_ID = ${order.id};
+const SECTION_LABELS = ${JSON.stringify(sections.map(s => s.label))};
 
 function toast(msg, duration = 3000) {
   const t = document.getElementById('toast');
@@ -591,17 +641,36 @@ function toast(msg, duration = 3000) {
   setTimeout(() => t.style.display = 'none', duration);
 }
 
+// Auto-height textareas
+document.querySelectorAll('.section-textarea').forEach(ta => {
+  ta.style.height = ta.scrollHeight + 'px';
+  ta.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'; });
+});
+
 async function saveLyrics() {
   const btn = document.getElementById('btn-save');
   btn.disabled = true; btn.textContent = 'Sauvegarde...';
   try {
+    // Réassembler les sections en texte brut
+    const parts = [];
+    document.querySelectorAll('.section-editor').forEach((el, i) => {
+      const label = SECTION_LABELS[i];
+      const content = el.querySelector('.section-textarea').value;
+      if (label) {
+        parts.push(label + '\\n\\n' + content);
+      } else {
+        parts.push(content);
+      }
+    });
+    const fullLyrics = parts.join('\\n\\n');
+
     const res = await fetch('/admin/api/order/' + ORDER_ID + '/save-lyrics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lyrics: document.getElementById('lyrics-editor').value })
+      body: JSON.stringify({ lyrics: fullLyrics })
     });
     const data = await res.json();
-    if (data.success) toast('Paroles sauvegardees');
+    if (data.success) toast('Paroles sauvegardées');
     else toast('Erreur: ' + (data.error || 'inconnue'));
   } catch (e) { toast('Erreur: ' + e.message); }
   btn.disabled = false; btn.textContent = 'Sauvegarder';
@@ -609,7 +678,6 @@ async function saveLyrics() {
 
 async function sendToClient() {
   if (!confirm('Envoyer les paroles au client pour validation ?')) return;
-  // Sauvegarder d'abord
   await saveLyrics();
   const btn = document.getElementById('btn-send');
   btn.disabled = true; btn.textContent = 'Envoi...';
@@ -620,7 +688,7 @@ async function sendToClient() {
     });
     const data = await res.json();
     if (data.success) {
-      toast('Paroles envoyees au client !');
+      toast('Paroles envoyées au client !');
       setTimeout(() => location.reload(), 1500);
     } else toast('Erreur: ' + (data.error || 'inconnue'));
   } catch (e) { toast('Erreur: ' + e.message); }
@@ -647,7 +715,7 @@ async function uploadFiles() {
     });
     const data = await res.json();
     if (data.success) {
-      toast('Fichiers uploades !');
+      toast('Fichiers uploadés !');
       setTimeout(() => location.reload(), 1500);
     } else toast('Erreur: ' + (data.error || 'inconnue'));
   } catch (e) { toast('Erreur: ' + e.message); }
@@ -665,7 +733,7 @@ async function deliverSongs() {
     });
     const data = await res.json();
     if (data.success) {
-      toast('Chansons livrees !');
+      toast('Chansons livrées !');
       setTimeout(() => location.reload(), 1500);
     } else toast('Erreur: ' + (data.error || 'inconnue'));
   } catch (e) { toast('Erreur: ' + e.message); }

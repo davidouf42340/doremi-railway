@@ -248,6 +248,17 @@ function formatBriefDeuil(b, order) {
 // GÉNÉRATION PAROLES — OpenAI GPT-4o
 // ============================================================
 async function genererParoles(briefTexte, isDeuil) {
+  const structureInstructions = `
+
+STRUCTURE OBLIGATOIRE du texte :
+- Chaque partie de la chanson doit être clairement identifiée par son nom sur une ligne seule, SANS parenthèses : Couplet 1, Refrain, Couplet 2, Pont, Dernier refrain, etc.
+- N'utilise JAMAIS de parenthèses autour des noms de parties. Écris simplement "Couplet 1" et non "(Couplet 1)".
+- Après chaque nom de partie, saute une ligne puis écris les paroles de cette partie.
+- Sépare chaque partie par une ligne vide avant le nom de la partie suivante.
+- Les strophes au sein d'une même partie sont séparées par une ligne vide.
+- La chanson doit comporter au minimum : Couplet 1, Refrain, Couplet 2, Refrain, Pont, Dernier refrain.
+- N'ajoute aucun commentaire, aucune explication — uniquement les paroles structurées.`;
+
   const systemPrompt = isDeuil
     ? `Tu es un parolier expert français spécialisé dans les chansons hommage et mémorielles.
 Tu travailles pour Dorémi, un service de chansons personnalisées pour accompagner les familles en deuil.
@@ -255,13 +266,13 @@ Tes chansons sont écrites avec une sensibilité extrême, de la délicatesse, e
 Tu écris des paroles qui seront mises en musique — elles doivent avoir un rythme naturel, des rimes, des couplets et un refrain mémorisable.
 La chanson doit honorer la mémoire du proche avec authenticité, sans être écrasante de tristesse.
 Tu ne mentionnes jamais que tu es une IA. Tu écris uniquement les paroles, sans commentaire.
-Supprime tous les mots de structure comme "Couplet", "Refrain", "Pont", "Outro" dans le texte final.`
+${structureInstructions}`
     : `Tu es un parolier expert français spécialisé dans les chansons personnalisées pour les grandes occasions.
 Tu travailles pour Dorémi, un service de chansons sur-mesure.
 Tu écris des paroles qui seront mises en musique — elles doivent avoir un rythme naturel, des rimes, des couplets et un refrain mémorisable.
 La chanson doit être authentique, émotionnelle, et refléter fidèlement les détails du brief fourni.
 Tu ne mentionnes jamais que tu es une IA. Tu écris uniquement les paroles, sans commentaire.
-Supprime tous les mots de structure comme "Couplet", "Refrain", "Pont", "Outro" dans le texte final.`;
+${structureInstructions}`;
 
   const sujet = isDeuil ? 'la personne dont je te mets le contenu' : 'les personnes dont je te mets le contenu';
   const userPrompt = `Je souhaite que tu écrives une chanson pour ${sujet}. La chanson doit être écrite comme un parolier expert car elle sera mise en musique ensuite. La chanson doit être construite avec des rimes, des couplets, un refrain.\n\n${briefTexte}`;
@@ -314,47 +325,14 @@ async function ajouterNoteCommande(orderId, note) {
 // BUILD NOTE FINALE
 // ============================================================
 function buildNote(order, brief, paroles, isDeuil) {
-  const separator = '='.repeat(50);
   const prenomKey = isDeuil ? 'Prénom du proche' : 'Prénom destinataire';
   const prenom    = brief[prenomKey] || 'Destinataire';
-  const occasion  = brief['Occasion'] || (isDeuil ? 'Souvenir & Mémoire' : 'Festivité');
-  const style     = brief['Style musical'] || '—';
-  const ambiance  = brief['Ambiance'] || '—';
-  const delai     = brief['Délai choisi'] || 'Standard';
   const timestamp = new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
 
-  // Brief brut — toutes les clés visibles (on exclut les métadonnées _internes)
-  const briefLignes = Object.entries(brief)
-    .filter(([k]) => !k.startsWith('_'))
-    .map(([k, v]) => `${k} : ${v}`)
-    .join('\n');
+  return `DOREMI — Paroles pour ${prenom}
+Generees le ${timestamp}
 
-  return `${separator}
-DOREMI — BRIEF CLIENT
-${separator}
-Commande   : #${order.order_number}
-Client     : ${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''} <${order.email}>
-Genere le  : ${timestamp}
-${separator}
-
-${briefLignes}
-
-${separator}
-DOREMI — PAROLES GENEREES
-${separator}
-Pour       : ${prenom}
-Occasion   : ${occasion}
-Style      : ${style}
-Ambiance   : ${ambiance}
-Delai      : ${delai}
-${separator}
-
-${paroles}
-
-${separator}
-Type formulaire : ${brief['_type_formulaire'] || brief['_version_formulaire'] || '—'}
-Brief soumis le : ${brief['_timestamp_brief'] ? new Date(brief['_timestamp_brief']).toLocaleString('fr-FR') : '—'}
-${separator}`;
+${paroles}`;
 }
 
 // ============================================================

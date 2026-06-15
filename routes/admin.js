@@ -102,7 +102,11 @@ router.post('/api/order/:id/send-to-client', async (req, res) => {
     const baseUrl = process.env.RAILWAY_PUBLIC_URL || `https://${req.get('host')}`;
     const validationUrl = `${baseUrl}/client/${order.client_token}`;
 
-    await shopify.notifyParolesPretes(order.shopify_order_id, validationUrl);
+    try {
+      await shopify.notifyParolesPretes(order.shopify_order_id, validationUrl);
+    } catch (shopifyErr) {
+      console.warn('[Admin] Erreur Shopify (non bloquant):', shopifyErr.message);
+    }
 
     res.json({ success: true, validationUrl });
   } catch (e) {
@@ -164,7 +168,11 @@ router.post('/api/order/:id/deliver', async (req, res) => {
     const baseUrl = process.env.RAILWAY_PUBLIC_URL || `https://${req.get('host')}`;
     const pageUrl = `${baseUrl}/page/${order.public_token}`;
 
-    await shopify.notifyChansonsLivrees(order.shopify_order_id, pageUrl);
+    try {
+      await shopify.notifyChansonsLivrees(order.shopify_order_id, pageUrl);
+    } catch (shopifyErr) {
+      console.warn('[Admin] Erreur Shopify livraison (non bloquant):', shopifyErr.message);
+    }
 
     res.json({ success: true, pageUrl });
   } catch (e) {
@@ -460,86 +468,79 @@ function orderDetailPage(order) {
     .map(([k, v]) => `<div class="brief-item"><span class="brief-key">${escapeHtml(k)} :</span> ${escapeHtml(String(v))}</div>`)
     .join('');
 
-  // Modifications client — construire un index par section+lineIndex pour lookup rapide
+  // Modifications client — mapper vers section+lineIndex
   const clientMods = order.lyrics_client_modifications || [];
-  const modsIndex = {}; // clé: "sectionLabel|lineIndex" → mod
-  clientMods.forEach(m => {
-    const key = (m.section || '') + '|' + (m.lineIndex ?? m.line ?? '');
-    modsIndex[key] = m;
-  });
   const hasClientMods = clientMods.length > 0;
 
-  // Construire l'éditeur par sections avec modifications inline
-  const sectionsEditorHtml = sections.map((section, sIdx) => {
-    const sectionLabel = section.label || 'Introduction';
-
-    // Construire les lignes avec highlighting si modification demandée
-    const linesHtml = section.lines.map((line, lIdx) => {
-      const modKey = sectionLabel + '|' + lIdx;
-      const mod = modsIndex[modKey];
-      const isEmpty = line.trim() === '';
-
-      if (mod) {
-        // Ligne avec modification demandée — highlight rouge + demande client
-        return `
-        <div class="line-mod-block" id="mod-block-${sIdx}-${lIdx}">
-          <div class="line-mod-current">
-            <div class="line-mod-num">${lIdx + 1}</div>
-            <div class="line-mod-text">${escapeHtml(line)}</div>
-            <button class="btn-mod-apply" onclick="openModEdit(${sIdx},${lIdx})" id="btn-mod-${sIdx}-${lIdx}">Modifier</button>
-          </div>
-          <div class="line-mod-request">
-            <div class="line-mod-arrow">&#8627;</div>
-            <div class="line-mod-details">
-              ${mod.modified && mod.modified !== mod.original ? `<div class="line-mod-proposed">Proposition : <strong>${escapeHtml(mod.modified)}</strong></div>` : ''}
-              ${mod.remark ? `<div class="line-mod-remark">${escapeHtml(mod.remark)}</div>` : ''}
-            </div>
-          </div>
-          <div class="line-mod-edit-zone" id="mod-edit-${sIdx}-${lIdx}" style="display:none">
-            <textarea class="line-mod-textarea" id="mod-textarea-${sIdx}-${lIdx}" rows="2">${escapeHtml(mod.modified && mod.modified !== mod.original ? mod.modified : line)}</textarea>
-            <div class="line-mod-edit-actions">
-              <button class="btn btn-gold" style="padding:6px 16px;font-size:12px" onclick="confirmModEdit(${sIdx},${lIdx})">Confirmer la modification</button>
-              <button class="btn btn-outline" style="padding:6px 16px;font-size:12px" onclick="cancelModEdit(${sIdx},${lIdx})">Annuler</button>
-            </div>
-          </div>
-        </div>`;
-      } else {
-        // Ligne normale sans modification
-        return `<div class="line-normal${isEmpty ? ' line-empty' : ''}">${!isEmpty ? `<span class="line-normal-num">${lIdx + 1}</span>` : ''}<span class="line-normal-text">${escapeHtml(line) || '&nbsp;'}</span></div>`;
+  // Convertir ancien format (global line index) vers section+lineIndex
+  const mappedMods = clientMods.map(m => {
+    if (m.section) return m; // nouveau format, déjà bon
+    // Ancien format: m.line = index global dans le texte brut
+    const globalLine = m.line;
+    if (globalLine === undefined && globalLine === null) return m;
+    const allLines = lyrics.split('\n');
+    const originalLine = allLines[globalLine] || '';
+    // Trouver dans quelle section cette ligne se trouve
+    let runningIdx = 0;
+    for (const section of sections) {
+      const sLabel = section.label || 'Introduction';
+      // Compter la ligne du label + ligne vide après
+      if (section.label) runningIdx += 2; // label line + blank line
+      for (let lIdx = 0; lIdx < section.lines.length; lIdx++) {
+        if (runningIdx === globalLine) {
+          return { ...m, section: sLabel, lineIndex: lIdx };
+        }
+        runningIdx++;
       }
-    }).join('');
+      runningIdx++; // blank line separator between sections
+    }
+    return m; // fallback
+  });
 
-    return `
-    <div class="section-block" data-section-index="${sIdx}" data-section-label="${escapeHtml(sectionLabel)}">
-      <div class="section-label-admin">${escapeHtml(sectionLabel)}</div>
-      <div class="section-lines" id="section-lines-${sIdx}">
-        ${linesHtml}
-      </div>
-    </div>`;
-  }).join('');
+  // Grouper par section pour affichage
+  const modsBySection = {};
+  mappedMods.forEach((m, mIdx) => {
+    const sLabel = m.section || 'Introduction';
+    if (!modsBySection[sLabel]) modsBySection[sLabel] = [];
+    modsBySection[sLabel].push({ ...m, _idx: mIdx });
+  });
 
-  // Zone de preview (cachée par défaut, visible après modifications)
-  const previewHtml = hasClientMods ? `
-  <div class="card" id="preview-card" style="display:none;border:2px solid var(--or)">
-    <div class="card-header">
-      <span class="card-title" id="preview-title">Version corrigée de la chanson</span>
-    </div>
-    <div id="preview-content" style="font-family:var(--serif);font-size:16px;line-height:2;padding:8px 0"></div>
-    <div class="actions-bar">
-      <button class="btn btn-gold" onclick="sendCorrectedToClient()" id="btn-send-corrected">Envoyer la modification au client</button>
-    </div>
-  </div>` : '';
-
-  // Mode éditeur libre (quand pas de modifications client)
-  const freeEditorHtml = !hasClientMods ? sections.map((section, i) => {
+  // Éditeur par sections — TOUJOURS des textareas éditables
+  const sectionsEditorHtml = sections.map((section, i) => {
+    const sLabel = section.label || 'Introduction';
     const lineCount = section.lines.length || 3;
     const rows = Math.max(lineCount + 1, 3);
+
+    // Modifications pour cette section
+    const sectionMods = modsBySection[sLabel] || [];
+    let modsCalloutHtml = '';
+    if (sectionMods.length > 0) {
+      const modsItems = sectionMods.map(m => {
+        const lineNum = (m.lineIndex !== undefined ? m.lineIndex + 1 : '?');
+        return `
+        <div class="mod-callout-item" id="mod-item-${i}-${m._idx}">
+          <div class="mod-callout-header">
+            <span class="mod-callout-line">Ligne ${lineNum}</span>
+            <button class="btn-mod-apply" onclick="applyMod(${i}, ${m._idx}, ${JSON.stringify(m.lineIndex)}, ${JSON.stringify(m.modified || '').replace(/</g, '\\u003c').replace(/>/g, '\\u003e')})" id="btn-apply-${i}-${m._idx}">Appliquer</button>
+          </div>
+          <div class="mod-callout-body">
+            <div class="mod-callout-original"><span class="mod-label">Actuel :</span> <span style="text-decoration:line-through;color:var(--gris)">${escapeHtml(m.original || '')}</span></div>
+            ${m.modified && m.modified !== m.original ? `<div class="mod-callout-proposed"><span class="mod-label">Proposition :</span> <strong>${escapeHtml(m.modified)}</strong></div>` : ''}
+            ${m.remark ? `<div class="mod-callout-remark">${escapeHtml(m.remark)}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+
+      modsCalloutHtml = `<div class="mod-callout-block">${modsItems}</div>`;
+    }
+
     return `
     <div class="section-editor" data-section-index="${i}">
-      <div class="section-label-admin">${escapeHtml(section.label || 'Introduction')}</div>
+      <div class="section-label-admin">${escapeHtml(sLabel)}</div>
       <textarea class="lyrics-editor section-textarea" id="section-editor-${i}" rows="${rows}">${escapeHtml(section.lines.join('\n'))}</textarea>
+      ${modsCalloutHtml}
     </div>`;
-  }).join('') : '';
+  }).join('');
 
   // Fichiers audio
   const song1 = order.song_file_1_url
@@ -557,53 +558,36 @@ function orderDetailPage(order) {
 <link rel="icon" type="image/png" href="${LOGO_URL}">
 ${STYLES}
 <style>
-  .section-block { margin-bottom:24px; }
-  .section-label-admin { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:var(--or); background:var(--or-pale); padding:5px 14px; border-radius:6px; margin-bottom:10px; }
-  .section-lines { background:#FAFAF9; border-radius:8px; padding:4px 0; }
-  .section-editor { margin-bottom:20px; }
+  .section-editor { margin-bottom:24px; }
+  .section-label-admin { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:var(--or); background:var(--or-pale); padding:5px 14px; border-radius:6px; margin-bottom:8px; }
   .section-textarea { min-height:auto!important; }
 
-  /* Lignes normales */
-  .line-normal { padding:6px 16px; font-family:var(--serif); font-size:16px; line-height:2; display:flex; align-items:baseline; gap:8px; }
-  .line-normal-num { font-family:var(--sans); font-size:10px; color:var(--gris-light); font-weight:600; min-width:20px; }
-  .line-normal-text { flex:1; }
-  .line-empty { min-height:16px; }
-
-  /* Lignes avec modification demandée */
-  .line-mod-block { background:#FFF0F0; border-left:4px solid #E53935; margin:4px 0; border-radius:0 8px 8px 0; padding:0; overflow:hidden; }
-  .line-mod-current { display:flex; align-items:center; padding:10px 16px; gap:10px; }
-  .line-mod-num { font-family:var(--sans); font-size:10px; color:#E53935; font-weight:700; min-width:20px; }
-  .line-mod-text { flex:1; font-family:var(--serif); font-size:16px; line-height:1.8; color:#B71C1C; font-weight:600; }
+  /* Callout modifications client */
+  .mod-callout-block { margin-top:8px; }
+  .mod-callout-item { background:#FFF0F0; border-left:4px solid #E53935; border-radius:0 8px 8px 0; padding:12px 16px; margin-bottom:8px; transition:all .3s; }
+  .mod-callout-item.applied { background:#E8F5E9; border-left-color:#4CAF50; }
+  .mod-callout-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+  .mod-callout-line { font-size:11px; font-weight:700; color:#E53935; text-transform:uppercase; letter-spacing:1px; }
+  .mod-callout-item.applied .mod-callout-line { color:#4CAF50; }
   .btn-mod-apply { padding:5px 14px; border-radius:6px; border:1.5px solid #E53935; background:var(--blanc); font-size:11px; cursor:pointer; font-family:var(--sans); color:#E53935; font-weight:600; transition:all .15s; white-space:nowrap; }
   .btn-mod-apply:hover { background:#E53935; color:var(--blanc); }
-  .btn-mod-apply.done { background:#4CAF50; border-color:#4CAF50; color:var(--blanc); cursor:default; }
+  .btn-mod-apply.done { background:#4CAF50; border-color:#4CAF50; color:var(--blanc); }
+  .mod-callout-body { font-size:13px; line-height:1.7; }
+  .mod-callout-original { margin-bottom:2px; }
+  .mod-callout-proposed { margin-bottom:2px; }
+  .mod-callout-proposed strong { color:var(--or); }
+  .mod-callout-remark { font-size:12px; color:var(--gris); font-style:italic; margin-top:4px; }
+  .mod-label { font-size:11px; color:var(--gris); font-weight:600; }
 
-  .line-mod-request { display:flex; padding:0 16px 10px 16px; gap:8px; align-items:flex-start; }
-  .line-mod-arrow { color:#E53935; font-size:16px; margin-top:2px; }
-  .line-mod-details { flex:1; }
-  .line-mod-proposed { font-size:13px; color:var(--charbon); margin-bottom:2px; }
-  .line-mod-proposed strong { color:var(--or); }
-  .line-mod-remark { font-size:12px; color:var(--gris); font-style:italic; }
-
-  .line-mod-edit-zone { padding:8px 16px 12px; background:#FFF8F8; border-top:1px solid #FFCDD2; }
-  .line-mod-textarea { width:100%; border:1.5px solid var(--or); border-radius:8px; padding:8px 12px; font-family:var(--serif); font-size:15px; line-height:1.6; outline:none; resize:none; }
-  .line-mod-textarea:focus { box-shadow:0 0 0 3px rgba(252,176,46,.2); }
-  .line-mod-edit-actions { display:flex; gap:8px; margin-top:8px; }
-
-  /* Ligne confirmée (après modification admin) */
-  .line-mod-block.confirmed { background:#E8F5E9; border-left-color:#4CAF50; }
-  .line-mod-block.confirmed .line-mod-text { color:#2E7D32; }
-  .line-mod-block.confirmed .line-mod-num { color:#4CAF50; }
+  /* Barre progression modifications */
+  .mods-progress { background:var(--or-pale); border-radius:8px; padding:12px 20px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; }
+  .mods-progress-bar { height:6px; background:var(--gris-light); border-radius:3px; flex:1; margin:0 16px; max-width:200px; }
+  .mods-progress-fill { height:100%; background:#4CAF50; border-radius:3px; transition:width .3s; }
 
   /* Preview */
   .preview-line { padding:4px 16px; font-family:var(--serif); font-size:16px; line-height:2; }
   .preview-line.changed { background:var(--or-pale); color:var(--or); font-weight:600; border-left:3px solid var(--or); margin:2px 0; border-radius:0 4px 4px 0; }
   .preview-section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:var(--or); padding:12px 16px 4px; }
-
-  /* Compteur modifications */
-  .mods-progress { background:var(--or-pale); border-radius:8px; padding:12px 20px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; }
-  .mods-progress-bar { height:6px; background:var(--gris-light); border-radius:3px; flex:1; margin:0 16px; max-width:200px; }
-  .mods-progress-fill { height:100%; background:#4CAF50; border-radius:3px; transition:width .3s; }
 </style>
 </head>
 <body>
@@ -636,32 +620,40 @@ ${STYLES}
     ${briefItems ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--gris);margin-top:8px">Voir le brief complet</summary><div class="brief-section">${briefItems}</div></details>` : ''}
   </div>
 
-  <!-- Paroles avec modifications inline OU éditeur libre -->
+  <!-- Éditeur de paroles par sections (TOUJOURS éditable) -->
   <div class="card">
     <div class="card-header">
       <span class="card-title">Paroles</span>
-      ${!hasClientMods ? '<button class="btn btn-outline" onclick="saveLyrics()" id="btn-save">Sauvegarder</button>' : ''}
+      <button class="btn btn-outline" onclick="saveLyrics()" id="btn-save">Sauvegarder</button>
     </div>
 
     ${hasClientMods ? `
     <div class="mods-progress" id="mods-progress">
-      <span id="mods-progress-text">${clientMods.length} modification(s) demandée(s)</span>
+      <span id="mods-progress-text">${clientMods.length} modification(s) demandée(s) par le client</span>
       <div class="mods-progress-bar"><div class="mods-progress-fill" id="mods-progress-fill" style="width:0%"></div></div>
       <span id="mods-progress-count">0 / ${clientMods.length}</span>
     </div>
-    ${sectionsEditorHtml}
-    ` : `
-    ${freeEditorHtml}
-    `}
+    ` : ''}
 
-    ${!hasClientMods ? `
+    ${sectionsEditorHtml}
+
     <div class="actions-bar">
       ${canSendToClient ? '<button class="btn btn-gold" onclick="sendToClient()" id="btn-send">Envoyer au client pour validation</button>' : ''}
     </div>
-    ` : ''}
   </div>
 
-  ${previewHtml}
+  <!-- Preview version corrigée (caché, visible après toutes les modifs) -->
+  ${hasClientMods ? `
+  <div class="card" id="preview-card" style="display:none;border:2px solid var(--or)">
+    <div class="card-header">
+      <span class="card-title">Version corrigée de la chanson</span>
+    </div>
+    <div id="preview-content" style="font-family:var(--serif);font-size:16px;line-height:2;padding:8px 0"></div>
+    <div class="actions-bar">
+      <button class="btn btn-gold" onclick="sendToClient()" id="btn-send-corrected">Envoyer la modification au client</button>
+    </div>
+  </div>
+  ` : ''}
 
   <!-- Upload MP3 -->
   <div class="card">
@@ -717,16 +709,14 @@ ${STYLES}
 <div class="toast" id="toast"></div>
 
 <script>
-const ORDER_ID = ${order.id};
-const SECTION_LABELS = ${JSON.stringify(sections.map(s => s.label))};
-const SECTIONS_DATA = ${JSON.stringify(sections.map(s => ({ label: s.label || 'Introduction', lines: s.lines })))};
-const CLIENT_MODS = ${JSON.stringify(clientMods)};
-const HAS_CLIENT_MODS = ${hasClientMods};
-const TOTAL_MODS = CLIENT_MODS.length;
-
-// Track confirmed modifications: key "sIdx-lIdx" => new text
-const confirmedEdits = {};
-let confirmedCount = 0;
+var ORDER_ID = ${order.id};
+var SECTION_LABELS = ${JSON.stringify(sections.map(s => s.label))};
+var SECTIONS_DATA = ${JSON.stringify(sections.map(s => ({ label: s.label || 'Introduction', lines: s.lines })))};
+var TOTAL_MODS = ${clientMods.length};
+var HAS_CLIENT_MODS = ${hasClientMods};
+var appliedCount = 0;
+// Track which mod indices have been applied
+var appliedMods = {};
 
 function toast(msg, duration) {
   duration = duration || 3000;
@@ -742,63 +732,59 @@ function escapeHtmlJS(str) {
   return div.innerHTML;
 }
 
-// ── Mode modifications inline ──
+// Auto-height textareas
+document.querySelectorAll('.section-textarea').forEach(function(ta) {
+  ta.style.height = ta.scrollHeight + 'px';
+  ta.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'; });
+});
 
-function openModEdit(sIdx, lIdx) {
-  var zone = document.getElementById('mod-edit-' + sIdx + '-' + lIdx);
-  zone.style.display = 'block';
-  var ta = document.getElementById('mod-textarea-' + sIdx + '-' + lIdx);
-  ta.focus();
-  ta.setSelectionRange(ta.value.length, ta.value.length);
-}
+// Appliquer une modification client dans le textarea
+function applyMod(sectionIdx, modIdx, lineIndex, proposedText) {
+  var ta = document.getElementById('section-editor-' + sectionIdx);
+  if (!ta) { toast('Section introuvable'); return; }
 
-function cancelModEdit(sIdx, lIdx) {
-  document.getElementById('mod-edit-' + sIdx + '-' + lIdx).style.display = 'none';
-}
+  var lines = ta.value.split('\\n');
 
-function confirmModEdit(sIdx, lIdx) {
-  var ta = document.getElementById('mod-textarea-' + sIdx + '-' + lIdx);
-  var newText = ta.value.trim();
-  var key = sIdx + '-' + lIdx;
+  if (lineIndex !== null && lineIndex !== undefined && lineIndex < lines.length && proposedText) {
+    lines[lineIndex] = proposedText;
+    ta.value = lines.join('\\n');
+    // Re-adjust height
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  } else {
+    // Pas de lineIndex précis ou pas de proposition — ouvrir le textarea et scroller
+    ta.focus();
+    toast('Modifiez manuellement dans le textarea ci-dessus');
+  }
 
-  // Update the line visually
-  var block = document.getElementById('mod-block-' + sIdx + '-' + lIdx);
-  block.classList.add('confirmed');
+  // Marquer comme appliqué
+  var item = document.getElementById('mod-item-' + sectionIdx + '-' + modIdx);
+  if (item) item.classList.add('applied');
+  var btn = document.getElementById('btn-apply-' + sectionIdx + '-' + modIdx);
+  if (btn) { btn.textContent = 'Appliqué'; btn.classList.add('done'); }
 
-  var textEl = block.querySelector('.line-mod-text');
-  textEl.textContent = newText;
+  var key = sectionIdx + '-' + modIdx;
+  if (!appliedMods[key]) {
+    appliedMods[key] = true;
+    appliedCount++;
+    updateModsProgress();
+  }
 
-  var btn = document.getElementById('btn-mod-' + sIdx + '-' + lIdx);
-  btn.textContent = 'Fait';
-  btn.classList.add('done');
-  btn.onclick = function() { openModEdit(sIdx, lIdx); btn.textContent = 'Modifier'; btn.classList.remove('done'); };
-
-  // Hide edit zone
-  document.getElementById('mod-edit-' + sIdx + '-' + lIdx).style.display = 'none';
-
-  // Track the edit
-  confirmedEdits[key] = newText;
-
-  // Update section data for preview
-  SECTIONS_DATA[sIdx].lines[lIdx] = newText;
-
-  // Update progress
-  confirmedCount = Object.keys(confirmedEdits).length;
-  updateModsProgress();
-
-  // If all done, show preview
-  if (confirmedCount >= TOTAL_MODS) {
+  // Si toutes les mods sont appliquées, montrer le preview
+  if (appliedCount >= TOTAL_MODS) {
     showPreview();
   }
 }
 
 function updateModsProgress() {
   if (!HAS_CLIENT_MODS) return;
-  var pct = Math.round((confirmedCount / TOTAL_MODS) * 100);
-  document.getElementById('mods-progress-fill').style.width = pct + '%';
-  document.getElementById('mods-progress-count').textContent = confirmedCount + ' / ' + TOTAL_MODS;
-  var text = confirmedCount === TOTAL_MODS ? 'Toutes les modifications sont faites !' : confirmedCount + ' modification(s) traitée(s)';
-  document.getElementById('mods-progress-text').textContent = text;
+  var pct = TOTAL_MODS > 0 ? Math.round((appliedCount / TOTAL_MODS) * 100) : 0;
+  var fill = document.getElementById('mods-progress-fill');
+  var count = document.getElementById('mods-progress-count');
+  var text = document.getElementById('mods-progress-text');
+  if (fill) fill.style.width = pct + '%';
+  if (count) count.textContent = appliedCount + ' / ' + TOTAL_MODS;
+  if (text) text.textContent = appliedCount >= TOTAL_MODS ? 'Toutes les modifications sont appliquées !' : appliedCount + ' modification(s) appliquée(s)';
 }
 
 function showPreview() {
@@ -806,20 +792,21 @@ function showPreview() {
   if (!previewCard) return;
   previewCard.style.display = 'block';
 
+  // Lire le contenu actuel des textareas
   var html = '';
-  SECTIONS_DATA.forEach(function(section) {
-    html += '<div class="preview-section-label">' + escapeHtmlJS(section.label) + '</div>';
-    section.lines.forEach(function(line, lIdx) {
-      var modKey = section.label + '|' + lIdx;
-      var isChanged = false;
-      CLIENT_MODS.forEach(function(m) {
-        var mKey = (m.section || '') + '|' + (m.lineIndex !== undefined ? m.lineIndex : '');
-        if (mKey === modKey) isChanged = true;
-      });
+  document.querySelectorAll('.section-editor').forEach(function(el, i) {
+    var label = SECTION_LABELS[i] || 'Introduction';
+    var ta = el.querySelector('.section-textarea');
+    var lines = ta.value.split('\\n');
+    var origLines = SECTIONS_DATA[i].lines;
+
+    html += '<div class="preview-section-label">' + escapeHtmlJS(label) + '</div>';
+    lines.forEach(function(line, lIdx) {
       if (line.trim() === '') {
         html += '<div class="preview-line">&nbsp;</div>';
       } else {
-        html += '<div class="preview-line' + (isChanged ? ' changed' : '') + '">' + escapeHtmlJS(line) + '</div>';
+        var changed = origLines[lIdx] !== undefined && origLines[lIdx] !== line;
+        html += '<div class="preview-line' + (changed ? ' changed' : '') + '">' + escapeHtmlJS(line) + '</div>';
       }
     });
   });
@@ -828,76 +815,23 @@ function showPreview() {
   previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-async function sendCorrectedToClient() {
-  if (!confirm('Sauvegarder les modifications et envoyer la nouvelle version au client ?')) return;
-
-  // Reassemble lyrics from SECTIONS_DATA
-  var parts = [];
-  SECTIONS_DATA.forEach(function(section) {
-    if (section.label && section.label !== 'Introduction') {
-      parts.push(section.label + '\n\n' + section.lines.join('\n'));
-    } else {
-      parts.push(section.lines.join('\n'));
-    }
-  });
-  var fullLyrics = parts.join('\n\n');
-
-  var btn = document.getElementById('btn-send-corrected');
-  btn.disabled = true;
-  btn.textContent = 'Envoi en cours...';
-
-  try {
-    // 1. Save lyrics
-    var saveRes = await fetch('/admin/api/order/' + ORDER_ID + '/save-lyrics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lyrics: fullLyrics })
-    });
-    var saveData = await saveRes.json();
-    if (!saveData.success) { toast('Erreur sauvegarde: ' + (saveData.error || 'inconnue')); btn.disabled = false; btn.textContent = 'Envoyer la modification au client'; return; }
-
-    // 2. Send to client
-    var sendRes = await fetch('/admin/api/order/' + ORDER_ID + '/send-to-client', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    var sendData = await sendRes.json();
-    if (sendData.success) {
-      toast('Nouvelle version envoyée au client !');
-      setTimeout(function() { location.reload(); }, 1500);
-    } else {
-      toast('Erreur envoi: ' + (sendData.error || 'inconnue'));
-    }
-  } catch (e) {
-    toast('Erreur: ' + e.message);
-  }
-  btn.disabled = false;
-  btn.textContent = 'Envoyer la modification au client';
-}
-
-// ── Mode éditeur libre (sans modifications client) ──
-
-// Auto-height textareas
-document.querySelectorAll('.section-textarea').forEach(function(ta) {
-  ta.style.height = ta.scrollHeight + 'px';
-  ta.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'; });
-});
-
 async function saveLyrics() {
   var btn = document.getElementById('btn-save');
-  btn.disabled = true; btn.textContent = 'Sauvegarde...';
+  if (btn) { btn.disabled = true; btn.textContent = 'Sauvegarde...'; }
   try {
     var parts = [];
     document.querySelectorAll('.section-editor').forEach(function(el, i) {
       var label = SECTION_LABELS[i];
-      var content = el.querySelector('.section-textarea').value;
+      var ta = el.querySelector('.section-textarea');
+      if (!ta) return;
+      var content = ta.value;
       if (label) {
-        parts.push(label + '\n\n' + content);
+        parts.push(label + '\\n\\n' + content);
       } else {
         parts.push(content);
       }
     });
-    var fullLyrics = parts.join('\n\n');
+    var fullLyrics = parts.join('\\n\\n');
 
     var res = await fetch('/admin/api/order/' + ORDER_ID + '/save-lyrics', {
       method: 'POST',
@@ -906,16 +840,22 @@ async function saveLyrics() {
     });
     var data = await res.json();
     if (data.success) toast('Paroles sauvegardées');
-    else toast('Erreur: ' + (data.error || 'inconnue'));
-  } catch (e) { toast('Erreur: ' + e.message); }
-  btn.disabled = false; btn.textContent = 'Sauvegarder';
+    else throw new Error(data.error || 'inconnue');
+  } catch (e) { toast('Erreur sauvegarde: ' + e.message); throw e; }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Sauvegarder'; } }
 }
 
 async function sendToClient() {
   if (!confirm('Envoyer les paroles au client pour validation ?')) return;
-  await saveLyrics();
-  var btn = document.getElementById('btn-send');
-  btn.disabled = true; btn.textContent = 'Envoi...';
+  var btn = document.getElementById('btn-send') || document.getElementById('btn-send-corrected');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sauvegarde et envoi...'; }
+  try {
+    await saveLyrics();
+  } catch (e) {
+    toast('Erreur sauvegarde — envoi annulé');
+    if (btn) { btn.disabled = false; btn.textContent = 'Envoyer au client pour validation'; }
+    return;
+  }
   try {
     var res = await fetch('/admin/api/order/' + ORDER_ID + '/send-to-client', {
       method: 'POST',
@@ -925,9 +865,9 @@ async function sendToClient() {
     if (data.success) {
       toast('Paroles envoyées au client !');
       setTimeout(function() { location.reload(); }, 1500);
-    } else toast('Erreur: ' + (data.error || 'inconnue'));
-  } catch (e) { toast('Erreur: ' + e.message); }
-  btn.disabled = false; btn.textContent = 'Envoyer au client pour validation';
+    } else toast('Erreur envoi: ' + (data.error || 'inconnue'));
+  } catch (e) { toast('Erreur envoi: ' + e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Envoyer au client pour validation'; }
 }
 
 function fileSelected(input, zoneId) {

@@ -70,7 +70,12 @@ router.get('/share/:token', async (req, res) => {
       return res.status(404).send(notFoundPage());
     }
 
-    res.send(personalPage(order, null, null, false));
+    // Même mise en page que la page perso (avec QR + header complet)
+    const baseUrl = process.env.RAILWAY_PUBLIC_URL || `https://${req.get('host')}`;
+    const shareUrl = `${baseUrl}/share/${order.public_token}`;
+    const qrDataUrl = await generateQRDataUrl(shareUrl);
+
+    res.send(personalPage(order, qrDataUrl, shareUrl, false));
   } catch (e) {
     console.error('[Pages] Erreur page publique:', e);
     res.status(500).send('Erreur serveur');
@@ -155,16 +160,21 @@ const STYLES = `
   .qr-img { border: 1px solid #EEEEE9; border-radius: 12px; padding: 16px; display: inline-block; background: var(--blanc); }
   .qr-url { font-size: 11px; color: var(--gris-light); margin-top: 16px; word-break: break-all; }
 
+  /* Bandeau promo */
+  .promo-bar { background: var(--or-pale); padding: 8px 32px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--charbon); }
+  .promo-bar .promo-discount { color: var(--or); font-size: 15px; font-weight: 700; margin-right: 6px; }
+  .promo-bar .promo-code { color: var(--or); font-weight: 700; background: var(--blanc); padding: 2px 8px; border-radius: 4px; margin-left: 4px; font-size: 14px; }
+
   /* Footer bandeau */
-  .footer-bar { background: var(--blanc); border-top: 1px solid #EEEEE9; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .footer-bar { background: var(--blanc); border-top: 1px solid #EEEEE9; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
   .footer-bar-left { display: flex; align-items: center; gap: 12px; }
   .footer-bar-logo { height: 40px; width: auto; opacity: 0.8; }
   .footer-bar-text { font-size: 12px; color: var(--gris); line-height: 1.5; }
   .footer-bar-text a { color: var(--or); text-decoration: none; font-weight: 600; }
   .footer-bar-text a:hover { text-decoration: underline; }
-  .footer-bar-links { display: flex; gap: 16px; }
-  .footer-bar-links a { font-size: 11px; color: var(--gris-light); text-decoration: none; }
-  .footer-bar-links a:hover { color: var(--charbon); }
+  .footer-bar-right { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--charbon); }
+  .footer-bar-right .promo-discount { color: var(--or); font-size: 15px; font-weight: 700; }
+  .footer-bar-right .promo-code { color: var(--or); font-weight: 700; background: var(--or-pale); padding: 2px 8px; border-radius: 4px; font-size: 14px; }
 
   @media (max-width: 640px) {
     .header { padding: 12px 16px; }
@@ -178,7 +188,8 @@ const STYLES = `
     .hero { padding: 20px 16px 16px; }
     .cover-img { max-width: 280px; }
     .btn { padding: 12px 20px; font-size: 12px; }
-    .footer-bar { flex-direction: column; gap: 12px; text-align: center; padding: 16px; }
+    .promo-bar { padding: 6px 16px; font-size: 12px; }
+    .footer-bar { flex-direction: column; gap: 12px; text-align: center; padding: 12px 16px; }
     .footer-bar-left { flex-direction: column; }
   }
 </style>
@@ -282,10 +293,13 @@ function personalPage(order, qrDataUrl, shareUrl, isOwner) {
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${pageTitle}</title>
 <link rel="icon" type="image/png" href="${LOGO_URL}">
 ${STYLES}
-<style>@media print { .header,.player-section,.actions-row,.footer-bar,.no-print { display:none!important; } .lyrics-card { box-shadow:none; border:none; } .lyrics-card::before { display:none; } body { background:#fff; } }</style>
+<style>@media print { .header,.promo-bar,.player-section,.actions-row,.footer-bar,.no-print { display:none!important; } .lyrics-card { box-shadow:none; border:none; } .lyrics-card::before { display:none; } body { background:#fff; } }</style>
 </head>
 <body>
-${headerHtml(isOwner ? qrDataUrl : null)}
+<div class="promo-bar no-print">
+  <span class="promo-discount">-10%</span> avec le code <span class="promo-code">QR10</span>
+</div>
+${headerHtml(qrDataUrl)}
 
 <div class="container">
   <div class="hero">
@@ -316,9 +330,8 @@ ${headerHtml(isOwner ? qrDataUrl : null)}
       Cette cr\u00e9ation musicale a \u00e9t\u00e9 cr\u00e9\u00e9e par <a href="https://doremisouvenir.fr">doremisouvenir.fr</a>
     </div>
   </div>
-  <div class="footer-bar-links">
-    <a href="https://doremisouvenir.fr/pages/notre-histoire">Notre histoire</a>
-    <a href="https://doremisouvenir.fr/pages/nos-chansons">Nos chansons</a>
+  <div class="footer-bar-right">
+    <span class="promo-discount">-10%</span> avec le code <span class="promo-code">QR10</span>
   </div>
 </div>
 

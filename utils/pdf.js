@@ -13,198 +13,166 @@ const GRIS = '#888780';
 const GRIS_LIGHT = '#D3D1C7';
 const LOGO_URL = 'https://doremisouvenir.fr/cdn/shop/files/logo-doremi-chanson-personnalisee.png';
 
-async function fetchBuffer(url) {
+async function safeFetch(url) {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return Buffer.from(await res.arrayBuffer());
-  } catch (e) { return null; }
+    const r = await fetch(url);
+    return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
+  } catch (_) { return null; }
 }
 
 async function generateLyricsPDF(order, shareUrl) {
-  return new Promise(async (resolve, reject) => {
+  const [logoImg, coverImg, qrImg] = await Promise.all([
+    safeFetch(LOGO_URL),
+    order.cover_image_url ? safeFetch(order.cover_image_url) : null,
+    shareUrl ? generateQRBuffer(shareUrl, { width: 200 }) : null,
+  ]);
+
+  return new Promise((resolve, reject) => {
     try {
-      const lyrics = order.lyrics_final || order.lyrics_admin_edited || order.lyrics_original || '';
-      const recipientName = order.recipient_name || '';
-      const occasion = order.occasion || '';
-      const coverUrl = order.cover_image_url || '';
-
-      // Pré-charger les images en parallèle
-      const [logoBuffer, coverBuffer, qrBuffer] = await Promise.all([
-        fetchBuffer(LOGO_URL),
-        coverUrl ? fetchBuffer(coverUrl) : null,
-        shareUrl ? generateQRBuffer(shareUrl, { width: 200 }) : null,
-      ]);
-
       const doc = new PDFDocument({
         size: 'A4',
-        margin: 50,
+        margins: { top: 40, bottom: 70, left: 50, right: 50 },
         info: {
-          Title: `Doremi — Chanson pour ${recipientName || 'vous'}`,
+          Title: `Doremi — Chanson pour ${order.recipient_name || 'vous'}`,
           Author: 'DoReMi Souvenir',
         },
       });
 
       const chunks = [];
-      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('data', c => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      const W = doc.page.width;   // 595
-      const L = 50;               // marge gauche
-      const R = W - 50;           // marge droite
-      const CW = R - L;           // largeur contenu
+      const W = doc.page.width;
+      const L = 50;
+      const R = W - 50;
+      const CW = R - L;
+      const name = order.recipient_name || 'vous';
+      const occasion = order.occasion || '';
+      const lyrics = order.lyrics_final || order.lyrics_admin_edited || order.lyrics_original || '';
 
-      // ─────────────────────────────────
-      // Fonctions utilitaires
-      // ─────────────────────────────────
-
-      function orangeLine() {
-        doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(OR).lineWidth(1.5).stroke();
-        doc.y += 2;
-      }
-
-      function thinLine() {
-        doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
-        doc.y += 2;
-      }
-
+      // ── Footer (position fixe en bas de chaque page) ──
       function drawFooter() {
-        // Position fixe en bas
         const fy = 775;
+        doc.save();
         doc.moveTo(L, fy).lineTo(R, fy).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
-
-        // Logo à gauche
-        if (logoBuffer) {
-          doc.image(logoBuffer, L, fy + 5, { width: 70 });
+        if (logoImg) {
+          doc.image(logoImg, L, fy + 4, { width: 65 });
         } else {
-          doc.fontSize(7).fillColor(GRIS).font('Helvetica');
-          doc.text('doremisouvenir.fr', L, fy + 8);
+          doc.font('Helvetica').fontSize(7).fillColor(GRIS);
+          doc.text('doremisouvenir.fr', L, fy + 8, { lineBreak: false });
         }
-
-        // Promo à droite
-        const px = R - 120;
-        doc.fontSize(14).fillColor(OR).font('Helvetica-Bold');
-        doc.text('-10%', px, fy + 5);
-        doc.fontSize(8).fillColor(CHARBON).font('Helvetica');
-        doc.text('avec le code', px + 42, fy + 7);
-        doc.fontSize(11).fillColor(OR).font('Helvetica-Bold');
-        doc.text('QR10', px + 42, fy + 18);
+        doc.font('Helvetica-Bold').fontSize(13).fillColor(OR);
+        doc.text('-10%', R - 115, fy + 4, { lineBreak: false });
+        doc.font('Helvetica').fontSize(8).fillColor(CHARBON);
+        doc.text('avec le code', R - 115, fy + 19, { lineBreak: false });
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(OR);
+        doc.text('QR10', R - 60, fy + 17, { lineBreak: false });
+        doc.restore();
       }
 
-      function newPage() {
+      // ── Saut de page ──
+      function pageBreak() {
         drawFooter();
         doc.addPage();
-        // Petit logo en haut des pages suivantes
-        if (logoBuffer) {
-          doc.image(logoBuffer, (W - 80) / 2, 40, { width: 80 });
-          doc.y = 72;
+        if (logoImg) {
+          doc.image(logoImg, (W - 80) / 2, 40, { width: 80 });
         }
-        orangeLine();
-        doc.y += 10;
+        doc.y = 78;
+        doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(OR).lineWidth(1).stroke();
+        doc.y = 92;
+        doc.x = L;
       }
 
-      // ─────────────────────────────────
+      // ══════════════════════════════
       // PAGE 1 — HEADER
-      // ─────────────────────────────────
+      // ══════════════════════════════
 
-      // Logo centré en haut
-      if (logoBuffer) {
-        const lw = 150;
-        doc.image(logoBuffer, (W - lw) / 2, doc.y, { width: lw });
-        doc.y += 50; // hauteur du logo
+      // Logo centré
+      if (logoImg) {
+        doc.image(logoImg, (W - 150) / 2, doc.y, { width: 150 });
+        doc.y += 55;
+      } else {
+        doc.font('Helvetica-Bold').fontSize(20).fillColor(OR);
+        doc.text('DoReMi Souvenir', { align: 'center' });
+        doc.moveDown(0.3);
       }
+
+      // Espace puis ligne dorée SOUS le logo
       doc.y += 8;
+      doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(OR).lineWidth(1.5).stroke();
+      doc.y += 16;
 
-      // Ligne dorée SOUS le logo
-      orangeLine();
-      doc.y += 15;
+      // Bloc 3 colonnes : pochette | titre | QR
+      const blockY = doc.y;
+      const blockH = 100;
+      const midBlockY = blockY + blockH / 2;
 
-      // ── Bloc pochette | titre | QR ──
-      // On sauvegarde la position Y de départ du bloc
-      const rowY = doc.y;
-      const rowH = 100;
-
-      // Pochette à gauche (colonne 1)
-      if (coverBuffer) {
-        doc.image(coverBuffer, L, rowY, { width: 95, height: 95 });
+      // Pochette gauche
+      if (coverImg) {
+        doc.image(coverImg, L, midBlockY - 47, { width: 95, height: 95 });
       }
 
-      // Titre au centre (colonne 2)
-      const col2x = coverBuffer ? L + 108 : L + 20;
-      const col2w = qrBuffer ? CW - 210 : CW - 110;
-      let ty = rowY + 12;
+      // QR droite
+      if (qrImg) {
+        doc.image(qrImg, R - 78, midBlockY - 40, { width: 78 });
+        doc.font('Helvetica').fontSize(6).fillColor(GRIS);
+        doc.text('Partagez ce QR code', R - 86, midBlockY + 42, { width: 94, align: 'center', lineBreak: false });
+      }
 
-      doc.fontSize(10).fillColor(GRIS).font('Helvetica');
-      doc.text('Une chanson pour', col2x, ty, { width: col2w, align: 'center' });
-      ty += 16;
-      doc.fontSize(22).fillColor(CHARBON).font('Helvetica-Bold');
-      doc.text(recipientName || 'vous', col2x, ty, { width: col2w, align: 'center' });
-      ty += 28;
+      // Titre centre
+      const tl = coverImg ? L + 108 : L + 10;
+      const tr = qrImg ? R - 92 : R - 10;
+      const tw = tr - tl;
+
+      doc.font('Helvetica').fontSize(10).fillColor(GRIS);
+      doc.text('Une chanson pour', tl, midBlockY - 30, { width: tw, align: 'center', lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(22).fillColor(CHARBON);
+      doc.text(name, tl, midBlockY - 14, { width: tw, align: 'center', lineBreak: false });
       if (occasion) {
-        doc.fontSize(11).fillColor(OR).font('Helvetica-Bold');
-        doc.text(occasion, col2x, ty, { width: col2w, align: 'center' });
-        ty += 18;
+        doc.font('Helvetica-Bold').fontSize(11).fillColor(OR);
+        doc.text(occasion, tl, midBlockY + 14, { width: tw, align: 'center', lineBreak: false });
       }
-      // Petite barre dorée
-      const cx = col2x + col2w / 2;
-      doc.moveTo(cx - 25, ty).lineTo(cx + 25, ty).strokeColor(OR).lineWidth(1.5).stroke();
+      const barY = occasion ? midBlockY + 30 : midBlockY + 16;
+      const cx = tl + tw / 2;
+      doc.moveTo(cx - 25, barY).lineTo(cx + 25, barY).strokeColor(OR).lineWidth(1.5).stroke();
 
-      // QR à droite (colonne 3)
-      if (qrBuffer) {
-        const qs = 75;
-        const qx = R - qs;
-        doc.image(qrBuffer, qx, rowY + 5, { width: qs });
-        doc.fontSize(6).fillColor(GRIS).font('Helvetica');
-        doc.text('Partagez ce QR code', qx - 8, rowY + qs + 8, { width: qs + 16, align: 'center' });
-      }
+      // Après le bloc header
+      doc.y = blockY + blockH + 16;
+      doc.x = L;
+      doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
+      doc.y += 12;
+      doc.x = L;
 
-      // Sauter sous le bloc
-      doc.y = rowY + rowH + 15;
-
-      // Ligne fine séparatrice
-      thinLine();
-      doc.y += 8;
-
-      // ─────────────────────────────────
-      // PAROLES
-      // ─────────────────────────────────
+      // ══════════════════════════════
+      // PAROLES — flow naturel PDFKit
+      // ══════════════════════════════
 
       const rawLines = lyrics.split('\n');
 
-      // Filtrer les lignes vides autour des labels
-      const displayLines = [];
       for (let i = 0; i < rawLines.length; i++) {
         const t = rawLines[i].trim();
+
         if (t === '') {
           const prev = i > 0 ? rawLines[i - 1].trim() : '';
           const next = i < rawLines.length - 1 ? rawLines[i + 1].trim() : '';
           if (SECTION_PATTERN.test(prev) || SECTION_PATTERN.test(next)) continue;
-          displayLines.push({ type: 'space' });
-        } else if (SECTION_PATTERN.test(t)) {
-          displayLines.push({ type: 'label', text: t.toUpperCase() });
-        } else {
-          displayLines.push({ type: 'line', text: t });
-        }
-      }
-
-      for (const item of displayLines) {
-        // Saut de page si on dépasse
-        if (doc.y > 750) {
-          newPage();
+          doc.moveDown(0.3);
+          continue;
         }
 
-        if (item.type === 'space') {
-          doc.y += 6;
-        } else if (item.type === 'label') {
-          doc.y += 10;
-          doc.fontSize(8).fillColor(OR).font('Helvetica-Bold');
-          doc.text(item.text, L, doc.y, { align: 'center', width: CW });
-          doc.y += 4;
-        } else {
-          doc.fontSize(13).fillColor(CHARBON).font('Helvetica');
-          doc.text(item.text, L, doc.y, { align: 'center', width: CW });
+        if (SECTION_PATTERN.test(t)) {
+          if (doc.y > 720) pageBreak();
+          doc.moveDown(0.5);
+          doc.font('Helvetica-Bold').fontSize(8).fillColor(OR);
+          doc.text(t.toUpperCase(), { align: 'center' });
+          doc.moveDown(0.15);
+          continue;
         }
+
+        if (doc.y > 740) pageBreak();
+        doc.font('Helvetica').fontSize(13).fillColor(CHARBON);
+        doc.text(t, { align: 'center', lineGap: 2 });
       }
 
       // Footer dernière page

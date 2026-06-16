@@ -138,11 +138,44 @@ router.post('/api/order/:id/upload', upload.fields([
 
     if (Object.keys(updates).length > 0) {
       await db.updateOrder(order.id, updates);
+
+      // Ajouter les URLs MP3 comme metafields sur la commande Shopify
+      if (order.shopify_order_id) {
+        try {
+          if (updates.song_file_1_url) {
+            await shopify.setOrderMetafield(order.shopify_order_id, 'doremi', 'song_file_1_url', updates.song_file_1_url);
+          }
+          if (updates.song_file_2_url) {
+            await shopify.setOrderMetafield(order.shopify_order_id, 'doremi', 'song_file_2_url', updates.song_file_2_url);
+          }
+        } catch (shopifyErr) {
+          console.warn('[Admin] Erreur Shopify metafield MP3 (non bloquant):', shopifyErr.message);
+        }
+      }
     }
 
     res.json({ success: true, updates });
   } catch (e) {
     console.error('[Admin] Erreur upload:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── API: POST /admin/api/order/:id/upload-cover — Upload jaquette ──
+router.post('/api/order/:id/upload-cover', upload.single('cover'), async (req, res) => {
+  try {
+    const order = await db.getOrderById(Number(req.params.id));
+    if (!order) return res.status(404).json({ error: 'Commande non trouvée' });
+
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Aucun fichier fourni' });
+
+    const shopifyUrl = await uploadToShopifyFiles(file);
+    await db.updateOrder(order.id, { cover_image_url: shopifyUrl });
+
+    res.json({ success: true, url: shopifyUrl });
+  } catch (e) {
+    console.error('[Admin] Erreur upload cover:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -240,7 +273,7 @@ async function uploadToShopifyFiles(file) {
   const createFileQuery = `
     mutation fileCreate($files: [FileCreateInput!]!) {
       fileCreate(files: $files) {
-        files { id alt createdAt }
+        files { id }
         userErrors { field message }
       }
     }
@@ -267,7 +300,45 @@ async function uploadToShopifyFiles(file) {
   const fileErrors = createData.data?.fileCreate?.userErrors;
   if (fileErrors?.length) throw new Error('Shopify fileCreate error: ' + JSON.stringify(fileErrors));
 
-  // Retourner le resourceUrl (URL CDN Shopify)
+  const fileId = createData.data?.fileCreate?.files?.[0]?.id;
+  if (!fileId) throw new Error('Shopify fileCreate: pas d\'ID retourné');
+
+  // Étape 4 : Attendre que le fichier soit prêt et récupérer l'URL permanente
+  const fileQuery = `
+    query getFile($id: ID!) {
+      node(id: $id) {
+        ... on GenericFile {
+          url
+          originalFileSize
+        }
+      }
+    }
+  `;
+
+  // Shopify traite le fichier de manière asynchrone — on attend jusqu'à 30s
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise(r => setTimeout(r, 3000));
+
+    const fileRes = await fetch(`https://${shop}/admin/api/2024-01/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': token,
+      },
+      body: JSON.stringify({ query: fileQuery, variables: { id: fileId } }),
+    });
+
+    const fileData = await fileRes.json();
+    const fileUrl = fileData.data?.node?.url;
+
+    if (fileUrl) {
+      console.log(`[Dorémi] Fichier Shopify prêt: ${fileUrl}`);
+      return fileUrl;
+    }
+  }
+
+  // Fallback si le fichier n'est pas prêt après 30s — retourner l'URL staged
+  console.warn('[Dorémi] Fichier Shopify pas encore prêt, fallback URL staged');
   return target.resourceUrl;
 }
 
@@ -655,6 +726,17 @@ ${STYLES}
   </div>
   ` : ''}
 
+  <!-- Jaquette / Pochette -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">Pochette</span></div>
+    ${order.cover_image_url ? `<div style="margin-bottom:12px"><img src="${order.cover_image_url}" alt="Pochette" style="max-width:200px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)"></div>` : ''}
+    <div class="upload-zone" onclick="this.querySelector('input').click()" id="zone-cover" style="max-width:200px;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <div style="font-size:20px">&#128247;</div>
+      <div style="font-size:12px;color:var(--gris)">Cliquez pour ajouter la pochette</div>
+      <input type="file" name="cover" accept="image/*" style="display:none" onchange="uploadCover(this)">
+    </div>
+  </div>
+
   <!-- Upload MP3 -->
   <div class="card">
     <div class="card-header"><span class="card-title">Fichiers audio</span></div>
@@ -876,6 +958,24 @@ function fileSelected(input, zoneId) {
     zone.classList.add('has-file');
     zone.querySelector('div:last-of-type').textContent = input.files[0].name;
   }
+}
+
+async function uploadCover(input) {
+  if (!input.files[0]) return;
+  var zone = document.getElementById('zone-cover');
+  zone.style.opacity = '0.5';
+  zone.querySelector('div:nth-child(2)').textContent = 'Upload en cours...';
+  try {
+    var fd = new FormData();
+    fd.append('cover', input.files[0]);
+    var res = await fetch('/admin/api/order/' + ORDER_ID + '/upload-cover', { method: 'POST', body: fd });
+    var data = await res.json();
+    if (data.success) {
+      toast('Pochette uploadée !');
+      setTimeout(function() { location.reload(); }, 1500);
+    } else toast('Erreur: ' + (data.error || 'inconnue'));
+  } catch (e) { toast('Erreur: ' + e.message); }
+  zone.style.opacity = '1';
 }
 
 async function uploadFiles() {

@@ -137,8 +137,8 @@ const STYLES = `
   .lyrics-card { background: var(--blanc); border-radius: var(--radius); padding: 36px 40px; box-shadow: 0 2px 8px rgba(0,0,0,.04); margin-bottom: 24px; position: relative; }
   .lyrics-card::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 60px; height: 3px; background: var(--or); border-radius: 0 0 3px 3px; }
   .lyrics-text { font-family: var(--serif); font-size: 19px; line-height: 2; color: var(--charbon); text-align: center; white-space: pre-line; }
-  .lyrics-divider { width: 40px; height: 1px; background: var(--or); margin: 12px auto; opacity: 0.5; }
-  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 16px 0 6px; display: block; text-align: left; }
+  .lyrics-spacer { height: 8px; }
+  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 14px 0 4px; display: block; text-align: left; }
 
   /* Boutons */
   .actions-row { display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
@@ -222,7 +222,7 @@ function personalPage(order, qrDataUrl, shareUrl, isOwner) {
   // Paroles formatées — labels à gauche, moins d'espaces
   const lyricsHtml = lyrics.split('\n').map(line => {
     const trimmed = line.trim();
-    if (trimmed === '') return '<div class="lyrics-divider"></div>';
+    if (trimmed === '') return '<div class="lyrics-spacer"></div>';
     if (SECTION_PATTERN.test(trimmed)) return `<div class="lyrics-section-label">${trimmed}</div>`;
     return line;
   }).join('\n');

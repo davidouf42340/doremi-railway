@@ -151,34 +151,84 @@ async function generateLyricsPDF(order, shareUrl) {
       doc.x = L;
 
       // ══════════════════════════════
-      // PAROLES — flow naturel PDFKit
+      // PAROLES — groupées par section pour éviter les coupures
       // ══════════════════════════════
 
+      // Pré-grouper les lignes en blocs (label + ses lignes de texte)
       const rawLines = lyrics.split('\n');
+      const blocks = [];
+      let currentBlock = null;
 
       for (let i = 0; i < rawLines.length; i++) {
         const t = rawLines[i].trim();
 
         if (t === '') {
+          // Ignorer lignes vides autour des labels
           const prev = i > 0 ? rawLines[i - 1].trim() : '';
           const next = i < rawLines.length - 1 ? rawLines[i + 1].trim() : '';
           if (SECTION_PATTERN.test(prev) || SECTION_PATTERN.test(next)) continue;
-          doc.moveDown(0.3);
+          // Spacer entre strophes sans label
+          if (currentBlock) {
+            blocks.push(currentBlock);
+            currentBlock = null;
+          }
+          blocks.push({ type: 'space' });
           continue;
         }
 
         if (SECTION_PATTERN.test(t)) {
-          if (doc.y > 720) pageBreak();
-          doc.moveDown(0.5);
-          doc.font('Helvetica-Bold').fontSize(8).fillColor(OR);
-          doc.text(t.toUpperCase(), { align: 'center' });
-          doc.moveDown(0.15);
+          // Nouveau bloc section
+          if (currentBlock) blocks.push(currentBlock);
+          currentBlock = { type: 'section', label: t.toUpperCase(), lines: [] };
           continue;
         }
 
-        if (doc.y > 740) pageBreak();
-        doc.font('Helvetica').fontSize(13).fillColor(CHARBON);
-        doc.text(t, { align: 'center', lineGap: 2 });
+        // Ligne de texte
+        if (currentBlock && currentBlock.type === 'section') {
+          currentBlock.lines.push(t);
+        } else {
+          if (!currentBlock) currentBlock = { type: 'section', label: null, lines: [] };
+          currentBlock.lines.push(t);
+        }
+      }
+      if (currentBlock) blocks.push(currentBlock);
+
+      // Hauteur estimée d'un bloc section (label + N lignes)
+      // Label = ~20px, chaque ligne texte fontSize 13 = ~18px
+      function blockHeight(block) {
+        if (block.type === 'space') return 8;
+        let h = 0;
+        if (block.label) h += 22; // label + espaces
+        h += block.lines.length * 18; // lignes de texte
+        return h;
+      }
+
+      // Écrire les blocs
+      for (const block of blocks) {
+        if (block.type === 'space') {
+          doc.moveDown(0.3);
+          continue;
+        }
+
+        // Vérifier si le bloc entier tient sur la page
+        const needed = blockHeight(block);
+        if (doc.y + needed > 740) {
+          pageBreak();
+        }
+
+        // Label
+        if (block.label) {
+          doc.moveDown(0.5);
+          doc.font('Helvetica-Bold').fontSize(8).fillColor(OR);
+          doc.text(block.label, { align: 'center' });
+          doc.moveDown(0.15);
+        }
+
+        // Lignes de texte
+        for (const line of block.lines) {
+          doc.font('Helvetica').fontSize(13).fillColor(CHARBON);
+          doc.text(line, { align: 'center', lineGap: 2 });
+        }
       }
 
       // Footer dernière page

@@ -210,7 +210,8 @@ function notFoundPage() {
 
 // ── Page personnelle / publique ──
 function personalPage(order, qrDataUrl, shareUrl, isOwner) {
-  const lyrics = order.lyrics_final || order.lyrics_admin_edited || order.lyrics_original || '';
+  const lyrics = (order.lyrics_final || order.lyrics_admin_edited || order.lyrics_original || '')
+    .replace(/<br\s*\/?>/gi, '').replace(/<[^>]+>/g, '');
   const recipientName = order.recipient_name || '';
   const occasion = order.occasion || '';
   const hasSongs = order.song_file_1_url || order.song_file_2_url;

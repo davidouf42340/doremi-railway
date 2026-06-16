@@ -1,6 +1,6 @@
 // ============================================================
 // Dorémi — Génération PDF des paroles
-// 2 pages A4, style identique à la page client
+// 2-3 pages A4, style identique à la page client
 // ============================================================
 
 const PDFDocument = require('pdfkit');
@@ -16,9 +16,11 @@ const GRIS_LIGHT = '#D3D1C7';
 const LOGO_URL = 'https://doremisouvenir.fr/cdn/shop/files/logo-doremi-chanson-personnalisee.png';
 
 async function fetchBuffer(url) {
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  return Buffer.from(await res.arrayBuffer());
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch (e) { return null; }
 }
 
 async function generateLyricsPDF(order, shareUrl) {
@@ -26,7 +28,7 @@ async function generateLyricsPDF(order, shareUrl) {
     try {
       const doc = new PDFDocument({
         size: 'A4',
-        margins: { top: 36, bottom: 36, left: 48, right: 48 },
+        margins: { top: 40, bottom: 60, left: 50, right: 50 },
         info: {
           Title: `Doremi — Chanson pour ${order.recipient_name || 'vous'}`,
           Author: 'DoReMi Souvenir',
@@ -43,9 +45,9 @@ async function generateLyricsPDF(order, shareUrl) {
       const occasion = order.occasion || '';
       const coverUrl = order.cover_image_url || '';
       const pageW = doc.page.width;  // 595.28
-      const contentW = pageW - 96;
-      const leftM = 48;
-      const rightM = pageW - 48;
+      const leftM = 50;
+      const rightM = pageW - 50;
+      const contentW = rightM - leftM;
 
       // Pré-charger les images
       const [logoBuffer, coverBuffer, qrBuffer] = await Promise.all([
@@ -54,90 +56,138 @@ async function generateLyricsPDF(order, shareUrl) {
         shareUrl ? generateQRBuffer(shareUrl, { width: 200 }) : null,
       ]);
 
-      // ══════════════════════════════════════════════
-      // PAGE 1 — Header
-      // ══════════════════════════════════════════════
+      // ══════════════════════════════════
+      // FONCTION — Dessiner le footer
+      // ══════════════════════════════════
+      function drawFooter() {
+        const footerY = 780;
 
-      // ── Logo DoRémi centré en gros ──
-      if (logoBuffer) {
-        const logoW = 180;
-        const logoX = (pageW - logoW) / 2;
-        doc.image(logoBuffer, logoX, doc.y, { width: logoW });
-        doc.y += 55;
-      } else {
-        doc.fontSize(24).fillColor(OR).font('Helvetica-Bold');
-        doc.text('DoReMi Souvenir', { align: 'center' });
-        doc.moveDown(0.5);
+        // Ligne séparatrice
+        doc.moveTo(leftM, footerY).lineTo(rightM, footerY).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
+
+        // Logo DoRémi à gauche
+        if (logoBuffer) {
+          doc.image(logoBuffer, leftM, footerY + 6, { width: 80 });
+        } else {
+          doc.fontSize(8).fillColor(GRIS).font('Helvetica');
+          doc.text('doremisouvenir.fr', leftM, footerY + 10);
+        }
+
+        // Promo à droite : icône cadeau + -10% + code QR10
+        const promoX = rightM - 160;
+        const promoY = footerY + 6;
+
+        // Icône cadeau (emoji-style en texte)
+        doc.fontSize(18).fillColor(OR);
+        doc.text('\u{1F381}', promoX, promoY, { width: 24 });
+
+        // Texte promo
+        doc.fontSize(12).fillColor(OR).font('Helvetica-Bold');
+        doc.text('-10%', promoX + 28, promoY + 2, { continued: false });
+        doc.fontSize(8).fillColor(CHARBON).font('Helvetica');
+        doc.text('avec le code', promoX + 28, promoY + 16, { continued: false });
+        doc.fontSize(10).fillColor(OR).font('Helvetica-Bold');
+        doc.text('QR10', promoX + 82, promoY + 14, { continued: false });
       }
 
-      doc.moveDown(0.3);
+      // ══════════════════════════════════
+      // FONCTION — En-tête de page
+      // ══════════════════════════════════
+      function drawPageHeader(isFirstPage) {
+        if (isFirstPage) {
+          // ── Logo DoRémi centré en gros AU-DESSUS de la ligne ──
+          if (logoBuffer) {
+            const logoW = 160;
+            const logoX = (pageW - logoW) / 2;
+            doc.image(logoBuffer, logoX, 40, { width: logoW });
+            doc.y = 90;
+          } else {
+            doc.fontSize(22).fillColor(OR).font('Helvetica-Bold');
+            doc.text('DoReMi Souvenir', leftM, 40, { align: 'center', width: contentW });
+            doc.y = 75;
+          }
 
-      // Ligne dorée séparatrice
-      doc.moveTo(leftM, doc.y).lineTo(rightM, doc.y).strokeColor(OR).lineWidth(1.5).stroke();
-      doc.moveDown(0.6);
+          // Ligne dorée
+          doc.moveTo(leftM, doc.y).lineTo(rightM, doc.y).strokeColor(OR).lineWidth(1.5).stroke();
+          doc.y += 12;
 
-      // ── Bloc : Pochette | Titre | QR — centrés en hauteur ──
-      const blockY = doc.y;
-      const blockH = 110;  // hauteur du bloc
+          // ── Bloc : Pochette | Titre | QR — centrés en hauteur ──
+          const blockY = doc.y;
+          const blockH = 105;
 
-      // Pochette à gauche
-      if (coverBuffer) {
-        const imgSize = 100;
-        const imgY = blockY + (blockH - imgSize) / 2;
-        doc.image(coverBuffer, leftM, imgY, { width: imgSize, height: imgSize });
+          // Pochette à gauche
+          if (coverBuffer) {
+            const imgSize = 95;
+            const imgY = blockY + (blockH - imgSize) / 2;
+            doc.image(coverBuffer, leftM, imgY, { width: imgSize, height: imgSize });
+          }
+
+          // QR à droite
+          if (qrBuffer) {
+            const qrSize = 75;
+            const qrX = rightM - qrSize;
+            const qrY = blockY + (blockH - qrSize - 14) / 2;
+            doc.image(qrBuffer, qrX, qrY, { width: qrSize });
+            doc.fontSize(6).fillColor(GRIS).font('Helvetica');
+            doc.text('Partagez ce QR code', qrX - 5, qrY + qrSize + 2, { width: qrSize + 10, align: 'center' });
+          }
+
+          // Titre au centre
+          const tLeft = coverBuffer ? leftM + 108 : leftM;
+          const tRight = qrBuffer ? rightM - 90 : rightM;
+          const tW = tRight - tLeft;
+          const tTotalH = 14 + 28 + (occasion ? 16 : 0);
+          let tY = blockY + (blockH - tTotalH) / 2;
+
+          doc.fontSize(10).fillColor(GRIS).font('Helvetica');
+          doc.text('Une chanson pour', tLeft, tY, { align: 'center', width: tW });
+          tY += 15;
+
+          doc.fontSize(22).fillColor(CHARBON).font('Helvetica-Bold');
+          doc.text(recipientName || 'vous', tLeft, tY, { align: 'center', width: tW });
+          tY += 28;
+
+          if (occasion) {
+            doc.fontSize(11).fillColor(OR).font('Helvetica-Bold');
+            doc.text(occasion, tLeft, tY, { align: 'center', width: tW });
+            tY += 16;
+          }
+
+          // Petite ligne dorée
+          const divCX = tLeft + tW / 2;
+          doc.moveTo(divCX - 25, tY).lineTo(divCX + 25, tY).strokeColor(OR).lineWidth(1.5).stroke();
+
+          // Position après le bloc
+          doc.y = blockY + blockH + 8;
+
+          // Ligne séparatrice fine
+          doc.moveTo(leftM, doc.y).lineTo(rightM, doc.y).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
+          doc.y += 10;
+
+        } else {
+          // Pages suivantes — petit logo + ligne
+          if (logoBuffer) {
+            const logoW2 = 90;
+            doc.image(logoBuffer, (pageW - logoW2) / 2, 36, { width: logoW2 });
+            doc.y = 70;
+          }
+          doc.moveTo(leftM, doc.y).lineTo(rightM, doc.y).strokeColor(OR).lineWidth(0.5).stroke();
+          doc.y += 10;
+        }
       }
 
-      // QR à droite
-      if (qrBuffer) {
-        const qrSize = 80;
-        const qrX = rightM - qrSize;
-        const qrY = blockY + (blockH - qrSize - 12) / 2;
-        doc.image(qrBuffer, qrX, qrY, { width: qrSize });
-        doc.fontSize(6).fillColor(GRIS).font('Helvetica');
-        doc.text('Partagez ce QR code', qrX - 5, qrY + qrSize + 2, { width: qrSize + 10, align: 'center' });
-      }
+      // ══════════════════════════════════
+      // PAGE 1 — Header + début paroles
+      // ══════════════════════════════════
 
-      // Titre au centre
-      const titleLeft = coverBuffer ? leftM + 112 : leftM;
-      const titleRight = qrBuffer ? rightM - 95 : rightM;
-      const titleW = titleRight - titleLeft;
+      drawPageHeader(true);
 
-      // Calculer la hauteur totale du titre pour le centrer
-      let titleTotalH = 14 + 30 + (occasion ? 16 : 0); // approx
-      let titleStartY = blockY + (blockH - titleTotalH) / 2;
-
-      doc.fontSize(10).fillColor(GRIS).font('Helvetica');
-      doc.text('Une chanson pour', titleLeft, titleStartY, { align: 'center', width: titleW });
-      titleStartY += 15;
-
-      doc.fontSize(24).fillColor(CHARBON).font('Helvetica-Bold');
-      doc.text(recipientName || 'vous', titleLeft, titleStartY, { align: 'center', width: titleW });
-      titleStartY += 30;
-
-      if (occasion) {
-        doc.fontSize(11).fillColor(OR).font('Helvetica-Bold');
-        doc.text(occasion, titleLeft, titleStartY, { align: 'center', width: titleW });
-        titleStartY += 16;
-      }
-
-      // Petite ligne dorée sous le titre
-      const divCX = titleLeft + titleW / 2;
-      doc.moveTo(divCX - 25, titleStartY + 2).lineTo(divCX + 25, titleStartY + 2).strokeColor(OR).lineWidth(1.5).stroke();
-
-      // Avancer après le bloc header
-      doc.y = blockY + blockH + 10;
-
-      // Ligne séparatrice
-      doc.moveTo(leftM, doc.y).lineTo(rightM, doc.y).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
-      doc.moveDown(0.5);
-
-      // ══════════════════════════════════════════════
-      // PAROLES — sur 2 pages
-      // ══════════════════════════════════════════════
-
+      // ── Paroles — taille lisible, sur 2-3 pages ──
       const lines = lyrics.split('\n');
-      const fontSize = 11;
-      const labelSize = 7.5;
+      const fontSize = 13;
+      const labelSize = 8;
+      const maxY = 765; // avant le footer
+      let isFirstPage = true;
 
       for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trim();
@@ -147,44 +197,39 @@ async function generateLyricsPDF(order, shareUrl) {
           const prev = i > 0 ? lines[i - 1].trim() : '';
           const next = i < lines.length - 1 ? lines[i + 1].trim() : '';
           if (SECTION_PATTERN.test(prev) || SECTION_PATTERN.test(next)) continue;
-          doc.moveDown(0.25);
+          doc.moveDown(0.3);
           continue;
         }
 
         if (SECTION_PATTERN.test(trimmed)) {
-          doc.moveDown(0.35);
+          // Vérifier qu'on a assez de place pour le label + au moins 2 lignes
+          if (doc.y > maxY - 60) {
+            drawFooter();
+            doc.addPage();
+            isFirstPage = false;
+            drawPageHeader(false);
+          }
+          doc.moveDown(0.4);
           doc.fontSize(labelSize).fillColor(OR).font('Helvetica-Bold');
           doc.text(trimmed.toUpperCase(), leftM, doc.y, { align: 'center', width: contentW });
           doc.moveDown(0.15);
           continue;
         }
 
-        doc.font('Helvetica').fontSize(fontSize).fillColor(CHARBON);
-        doc.text(trimmed, { align: 'center', lineGap: 2 });
-
         // Saut de page si nécessaire
-        if (doc.y > 740) {
+        if (doc.y > maxY) {
+          drawFooter();
           doc.addPage();
-          // En-tête page 2 — logo petit + ligne
-          if (logoBuffer) {
-            const logoW2 = 100;
-            doc.image(logoBuffer, (pageW - logoW2) / 2, 36, { width: logoW2 });
-            doc.y = 36 + 32;
-          }
-          doc.moveDown(0.3);
-          doc.moveTo(leftM, doc.y).lineTo(rightM, doc.y).strokeColor(OR).lineWidth(0.5).stroke();
-          doc.moveDown(0.5);
+          isFirstPage = false;
+          drawPageHeader(false);
         }
+
+        doc.font('Helvetica').fontSize(fontSize).fillColor(CHARBON);
+        doc.text(trimmed, leftM, doc.y, { align: 'center', width: contentW, lineGap: 3 });
       }
 
-      // ══════════════════════════════════════════════
-      // FOOTER — bas de la dernière page
-      // ══════════════════════════════════════════════
-
-      const footerY = 780;
-      doc.moveTo(leftM, footerY).lineTo(rightM, footerY).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
-      doc.fontSize(7).fillColor(GRIS).font('Helvetica');
-      doc.text('Cette creation musicale a ete creee par doremisouvenir.fr', leftM, footerY + 5, { align: 'center', width: contentW });
+      // Footer de la dernière page
+      drawFooter();
 
       doc.end();
     } catch (e) {

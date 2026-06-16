@@ -137,8 +137,8 @@ const STYLES = `
   .lyrics-card { background: var(--blanc); border-radius: var(--radius); padding: 36px 40px; box-shadow: 0 2px 8px rgba(0,0,0,.04); margin-bottom: 24px; position: relative; }
   .lyrics-card::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 60px; height: 3px; background: var(--or); border-radius: 0 0 3px 3px; }
   .lyrics-text { font-family: var(--serif); font-size: 19px; line-height: 2; color: var(--charbon); text-align: center; white-space: pre-line; }
-  .lyrics-spacer { height: 2px; }
-  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 10px 0 2px; display: block; text-align: left; }
+  .lyrics-spacer { height: 6px; }
+  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 8px 0 0; display: block; text-align: left; }
 
   /* Boutons */
   .actions-row { display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
@@ -219,13 +219,26 @@ function personalPage(order, qrDataUrl, shareUrl, isOwner) {
     ? `DoRémi Souvenir — Chanson pour ${recipientName}`
     : `Chanson pour ${recipientName} — DoRémi Souvenir`;
 
-  // Paroles formatées — labels à gauche, moins d'espaces
-  const lyricsHtml = lyrics.split('\n').map(line => {
-    const trimmed = line.trim();
-    if (trimmed === '') return '<div class="lyrics-spacer"></div>';
-    if (SECTION_PATTERN.test(trimmed)) return `<div class="lyrics-section-label">${trimmed}</div>`;
-    return line;
-  }).join('\n');
+  // Paroles formatées — supprime les espaces inutiles autour des labels
+  const rawLines = lyrics.split('\n');
+  const htmlParts = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const trimmed = rawLines[i].trim();
+    if (trimmed === '') {
+      // Ignorer les lignes vides avant/après un label de section
+      const prev = i > 0 ? rawLines[i - 1].trim() : '';
+      const next = i < rawLines.length - 1 ? rawLines[i + 1].trim() : '';
+      if (SECTION_PATTERN.test(prev) || SECTION_PATTERN.test(next)) continue;
+      // Ignorer les spacers consécutifs
+      if (htmlParts.length > 0 && htmlParts[htmlParts.length - 1].includes('lyrics-spacer')) continue;
+      htmlParts.push('<div class="lyrics-spacer"></div>');
+    } else if (SECTION_PATTERN.test(trimmed)) {
+      htmlParts.push(`<div class="lyrics-section-label">${trimmed}</div>`);
+    } else {
+      htmlParts.push(rawLines[i]);
+    }
+  }
+  const lyricsHtml = htmlParts.join('\n');
 
   // Lecteur MP3 intégré (sous la pochette/hero)
   let playerHtml = '';

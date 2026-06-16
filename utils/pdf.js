@@ -49,25 +49,31 @@ async function generateLyricsPDF(order, shareUrl) {
       const CW = R - L;
       const name = order.recipient_name || 'vous';
       const occasion = order.occasion || '';
-      const lyrics = order.lyrics_final || order.lyrics_admin_edited || order.lyrics_original || '';
+      // Nettoyer les balises HTML des paroles
+      const lyrics = (order.lyrics_final || order.lyrics_admin_edited || order.lyrics_original || '')
+        .replace(/<br\s*\/?>/gi, '')
+        .replace(/<[^>]+>/g, '');
 
       // ── Footer (position fixe en bas de chaque page) ──
       function drawFooter() {
         const fy = 775;
         doc.save();
         doc.moveTo(L, fy).lineTo(R, fy).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
+        // Logo à gauche
+        const logoY = fy + 6;
         if (logoImg) {
-          doc.image(logoImg, L, fy + 4, { width: 65 });
+          doc.image(logoImg, L, logoY, { width: 65 });
         } else {
           doc.font('Helvetica').fontSize(7).fillColor(GRIS);
-          doc.text('doremisouvenir.fr', L, fy + 8, { lineBreak: false });
+          doc.text('doremisouvenir.fr', L, logoY + 4, { lineBreak: false });
         }
-        doc.font('Helvetica-Bold').fontSize(13).fillColor(OR);
-        doc.text('-10%', R - 115, fy + 4, { lineBreak: false });
-        doc.font('Helvetica').fontSize(8).fillColor(CHARBON);
-        doc.text('avec le code', R - 115, fy + 19, { lineBreak: false });
+        // -10% avec le code QR10 — sur une ligne, aligné avec le logo
         doc.font('Helvetica-Bold').fontSize(10).fillColor(OR);
-        doc.text('QR10', R - 60, fy + 17, { lineBreak: false });
+        doc.text('-10% ', R - 140, logoY + 5, { continued: true, lineBreak: false });
+        doc.font('Helvetica').fontSize(9).fillColor(CHARBON);
+        doc.text('avec le code ', { continued: true, lineBreak: false });
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(OR);
+        doc.text('QR10', { lineBreak: false });
         doc.restore();
       }
 

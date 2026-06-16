@@ -118,11 +118,11 @@ const STYLES = `
   .cover-img { max-width: 360px; width: 100%; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
 
   /* Hero */
-  .hero { text-align: center; padding: 24px 20px 20px; }
-  .hero-for { font-family: var(--sans); font-size: 11px; text-transform: uppercase; letter-spacing: 3px; color: var(--gris); margin-bottom: 8px; font-weight: 500; }
-  .hero-name { font-family: var(--serif); font-size: 42px; font-weight: 400; color: var(--charbon); margin-bottom: 6px; line-height: 1.2; }
-  .hero-occasion { font-size: 14px; color: var(--or); font-weight: 500; letter-spacing: 0.5px; }
-  .hero-divider { width: 60px; height: 2px; background: var(--or); margin: 16px auto 0; border-radius: 1px; }
+  .hero { text-align: center; padding: 24px 20px 16px; }
+  .hero-for { font-family: var(--sans); font-size: 13px; text-transform: uppercase; letter-spacing: 4px; color: var(--gris); margin-bottom: 8px; font-weight: 500; }
+  .hero-name { font-family: var(--serif); font-size: 52px; font-weight: 400; color: var(--charbon); margin-bottom: 6px; line-height: 1.2; }
+  .hero-occasion { font-size: 16px; color: var(--or); font-weight: 600; letter-spacing: 0.5px; }
+  .hero-divider { width: 60px; height: 2px; background: var(--or); margin: 14px auto 0; border-radius: 1px; }
 
   /* Lecteur MP3 intégré */
   .player-section { background: var(--blanc); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
@@ -137,8 +137,8 @@ const STYLES = `
   .lyrics-card { background: var(--blanc); border-radius: var(--radius); padding: 36px 40px; box-shadow: 0 2px 8px rgba(0,0,0,.04); margin-bottom: 24px; position: relative; }
   .lyrics-card::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 60px; height: 3px; background: var(--or); border-radius: 0 0 3px 3px; }
   .lyrics-text { font-family: var(--serif); font-size: 19px; line-height: 2; color: var(--charbon); text-align: center; white-space: pre-line; }
-  .lyrics-spacer { height: 8px; }
-  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 14px 0 4px; display: block; text-align: left; }
+  .lyrics-spacer { height: 2px; }
+  .lyrics-section-label { font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px; color: var(--or); margin: 10px 0 2px; display: block; text-align: left; }
 
   /* Boutons */
   .actions-row { display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
@@ -274,17 +274,17 @@ ${STYLES}
 ${headerHtml(isOwner ? qrDataUrl : null)}
 
 <div class="container">
-  ${coverUrl ? `
-  <div class="cover-section">
-    <img src="${coverUrl}" alt="Pochette" class="cover-img">
-  </div>` : ''}
-
   <div class="hero">
     <div class="hero-for">${isOwner ? 'Votre chanson pour' : 'Une chanson pour'}</div>
     <div class="hero-name">${recipientName || 'vous'}</div>
     ${occasion ? `<div class="hero-occasion">${occasion}</div>` : ''}
     <div class="hero-divider"></div>
   </div>
+
+  ${coverUrl ? `
+  <div class="cover-section">
+    <img src="${coverUrl}" alt="Pochette" class="cover-img">
+  </div>` : ''}
 
   ${playerHtml}
 

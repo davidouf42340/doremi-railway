@@ -104,8 +104,8 @@ async function generateLyricsPDF(order, shareUrl) {
         doc.moveDown(0.3);
       }
 
-      // Espace puis ligne dorée SOUS le logo
-      doc.y += 8;
+      // 2 sauts de ligne puis ligne dorée SOUS le logo
+      doc.y += 30;
       doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(OR).lineWidth(1.5).stroke();
       doc.y += 16;
 
@@ -143,11 +143,11 @@ async function generateLyricsPDF(order, shareUrl) {
       const cx = tl + tw / 2;
       doc.moveTo(cx - 25, barY).lineTo(cx + 25, barY).strokeColor(OR).lineWidth(1.5).stroke();
 
-      // Après le bloc header
+      // Après le bloc header — 2 sauts de ligne
       doc.y = blockY + blockH + 16;
       doc.x = L;
       doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor(GRIS_LIGHT).lineWidth(0.5).stroke();
-      doc.y += 12;
+      doc.y += 30;
       doc.x = L;
 
       // ══════════════════════════════

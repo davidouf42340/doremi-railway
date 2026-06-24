@@ -1008,8 +1008,8 @@ async function deliverSongs() {
     });
     var data = await res.json();
     if (data.success) {
-      toast('Chansons livrées !');
-      setTimeout(function() { location.reload(); }, 1500);
+      toast('Chansons livrées ! Email envoyé au client via Shopify.');
+      setTimeout(function() { location.reload(); }, 2000);
     } else toast('Erreur: ' + (data.error || 'inconnue'));
   } catch (e) { toast('Erreur: ' + e.message); }
   btn.disabled = false; btn.textContent = 'Livrer les chansons au client';

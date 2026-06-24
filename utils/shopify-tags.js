@@ -65,6 +65,66 @@ async function setOrderMetafield(orderId, namespace, key, value) {
   console.log(`[Dorémi] Metafield ${namespace}.${key} ajouté sur commande ${orderId}`);
 }
 
+// ── Fulfillment — marquer la commande comme expédiée (envoie l'email Shopify) ──
+async function fulfillOrder(orderId, trackingUrl) {
+  const shop = SHOP();
+  const token = TOKEN();
+  const gqlUrl = `https://${shop}/admin/api/${API_VER}/graphql.json`;
+  const headers = { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token };
+
+  // Étape 1 : Récupérer les FulfillmentOrders de la commande
+  const orderGid = `gid://shopify/Order/${orderId}`;
+  const foQuery = `query { order(id: "${orderGid}") { fulfillmentOrders(first: 10) { nodes { id status } } } }`;
+
+  const foRes = await fetch(gqlUrl, { method: 'POST', headers, body: JSON.stringify({ query: foQuery }) });
+  const foData = await foRes.json();
+  const fulfillmentOrders = foData.data?.order?.fulfillmentOrders?.nodes || [];
+
+  // Filtrer les fulfillment orders ouvertes (pas déjà fulfilled)
+  const openFOs = fulfillmentOrders.filter(fo => fo.status === 'OPEN' || fo.status === 'IN_PROGRESS');
+  if (openFOs.length === 0) {
+    console.warn('[Dorémi] Aucune fulfillment order ouverte pour la commande', orderId);
+    return { fulfilled: false, reason: 'Commande déjà expédiée ou pas de fulfillment order' };
+  }
+
+  // Étape 2 : Créer le fulfillment
+  const fulfillMutation = `
+    mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
+      fulfillmentCreateV2(fulfillment: $fulfillment) {
+        fulfillment { id status }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const variables = {
+    fulfillment: {
+      lineItemsByFulfillmentOrder: openFOs.map(fo => ({ fulfillmentOrderId: fo.id })),
+      trackingInfo: {
+        company: 'DoRéMi Souvenir',
+        url: trackingUrl,
+        number: `DOREMI-${orderId}`,
+      },
+      notifyCustomer: true,
+    },
+  };
+
+  const fulfillRes = await fetch(gqlUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ query: fulfillMutation, variables }),
+  });
+
+  const fulfillData = await fulfillRes.json();
+  const userErrors = fulfillData.data?.fulfillmentCreateV2?.userErrors || [];
+  if (userErrors.length > 0) {
+    throw new Error('Shopify fulfillment: ' + userErrors.map(e => e.message).join(', '));
+  }
+
+  console.log(`[Dorémi] Commande ${orderId} marquée comme expédiée — email envoyé au client`);
+  return { fulfilled: true };
+}
+
 // ── Actions combinées pour chaque étape du workflow ──
 
 async function notifyParolesPretes(orderId, validationUrl) {
@@ -75,6 +135,12 @@ async function notifyParolesPretes(orderId, validationUrl) {
 async function notifyChansonsLivrees(orderId, pageUrl) {
   await addOrderTag(orderId, 'doremi-chansons-livrees');
   await setOrderMetafield(orderId, 'doremi', 'page_url', pageUrl);
+  // Fulfillment Shopify → envoie l'email de livraison au client
+  try {
+    await fulfillOrder(orderId, pageUrl);
+  } catch (err) {
+    console.warn('[Dorémi] Erreur fulfillment (non bloquant):', err.message);
+  }
 }
 
 module.exports = {
@@ -82,4 +148,5 @@ module.exports = {
   setOrderMetafield,
   notifyParolesPretes,
   notifyChansonsLivrees,
+  fulfillOrder,
 };
